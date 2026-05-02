@@ -23,3 +23,10 @@ effort = "low"
 # Without an allowed_tools list, `claude -p` denies non-default tools (Write,
 # Edit, etc.). The episodic-log step requires Write, so it's listed explicitly.
 allowed_tools = ["Read", "Write"]
+
+[[tasks]]
+id = "guard-test"
+prompt = "./tasks/guard-test.md"
+schedule = "0 0 1 1 *"     # Jan 1 yearly — effectively manual-only
+effort = "low"
+allowed_tools = ["Read", "Write", "Edit"]
