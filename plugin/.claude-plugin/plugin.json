@@ -1,0 +1,11 @@
+{
+  "name": "verona",
+  "version": "0.1.0",
+  "description": "Authoring skills for Verona — scaffold agents, tasks, connectors, and refine SOUL.md files.",
+  "author": {
+    "name": "Blake Simpson"
+  },
+  "repository": "https://github.com/blake-simpson/verona",
+  "license": "MIT",
+  "keywords": ["ai", "agents", "cli", "scheduling", "claude", "verona"]
+}

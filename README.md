@@ -122,7 +122,8 @@ src/                                # framework code
 agents/examples/                    # reference agents (templates)
   hello-world/   (smoke test)
   researcher/    (cron + Slack + WebFetch + thread replies)
-skills/verona/                      # /verona:* Claude Code skills
+plugin/                             # /verona:* Claude Code plugin (skills + manifest)
+marketplace.json                    # in-tree plugin marketplace descriptor
 deploy/                             # launchd + systemd templates
 knowledge/                          # dev-time living docs (NOT shipped to runtime)
 tests/

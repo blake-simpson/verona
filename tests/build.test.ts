@@ -50,6 +50,9 @@ const FORBIDDEN_PATHS = [
   "vitest.config.ts",
   "CONTRIBUTING.md",
   ".tool-versions",
+  "plugin",
+  "marketplace.json",
+  ".claude",
 ];
 
 const REQUIRED_FILES = [

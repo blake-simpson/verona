@@ -84,7 +84,7 @@ export async function getSecret(
 ): Promise<string | null> {
   validateKey(key);
   const file = path.join(scopeDir(secretsRoot, scope), key);
-  let st;
+  let st: Awaited<ReturnType<typeof stat>>;
   try {
     st = await stat(file);
   } catch (err) {

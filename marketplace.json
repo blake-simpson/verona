@@ -1,0 +1,14 @@
+{
+  "name": "verona",
+  "owner": {
+    "name": "Blake Simpson"
+  },
+  "plugins": [
+    {
+      "name": "verona",
+      "source": "./plugin",
+      "description": "Authoring skills for Verona — scaffold agents, tasks, connectors, and refine SOUL.md files.",
+      "version": "0.1.0"
+    }
+  ]
+}

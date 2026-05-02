@@ -9,7 +9,7 @@ If `git pull` or `verona deploy` could overwrite an agent's memory, no one would
 There are exactly two trees:
 
 **Source tree** (this repo):
-- `src/`, `agents/examples/`, `skills/`, `deploy/`, `tests/`, `scripts/`
+- `src/`, `agents/examples/`, `plugin/`, `marketplace.json`, `deploy/`, `tests/`, `scripts/`
 - `knowledge/`, `AGENTS.md`, `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`
 - Edited by humans + Claude Code working on Verona itself.
 

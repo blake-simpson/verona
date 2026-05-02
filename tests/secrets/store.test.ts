@@ -50,9 +50,9 @@ describe("secrets store", () => {
     expect(await getSecret(secretsRoot, { kind: "connector", id: "slack" }, "bot_token")).toBe(
       "xoxb-123",
     );
-    expect(
-      await getSecret(secretsRoot, { kind: "agent", name: "researcher" }, "github_pat"),
-    ).toBe("ghp-xyz");
+    expect(await getSecret(secretsRoot, { kind: "agent", name: "researcher" }, "github_pat")).toBe(
+      "ghp-xyz",
+    );
     // wrong scope returns null
     expect(await getSecret(secretsRoot, { kind: "global" }, "bot_token")).toBeNull();
   });
@@ -68,9 +68,9 @@ describe("secrets store", () => {
     const file = path.join(secretsRoot, "_global", "LEAKED");
     await chmod(file, 0o644); // world-readable — should be rejected
 
-    await expect(
-      getSecret(secretsRoot, { kind: "global" }, "LEAKED"),
-    ).rejects.toBeInstanceOf(SecretError);
+    await expect(getSecret(secretsRoot, { kind: "global" }, "LEAKED")).rejects.toBeInstanceOf(
+      SecretError,
+    );
   });
 
   it("rejects invalid scope names (path traversal etc.)", async () => {
