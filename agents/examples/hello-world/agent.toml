@@ -20,3 +20,6 @@ id = "greet"
 prompt = "./tasks/greet.md"
 schedule = "0 9 * * *"
 effort = "low"
+# Without an allowed_tools list, `claude -p` denies non-default tools (Write,
+# Edit, etc.). The episodic-log step requires Write, so it's listed explicitly.
+allowed_tools = ["Read", "Write"]
