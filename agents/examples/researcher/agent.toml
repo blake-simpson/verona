@@ -24,9 +24,11 @@ schedule = "0 3 * * *"
 effort = "high"
 allowed_tools = ["Read", "Write", "WebFetch"]
 
-[[tasks]]
-id = "deep-dive"
-prompt = "./tasks/deep-dive.md"
-on_message = true
-effort = "high"
-allowed_tools = ["Read", "Write", "WebFetch"]
+# Slack thread replies don't need a separate task. When you @-mention this
+# agent in the channel where it posted a digest, the daemon resumes the same
+# `claude -p` session and your message becomes the next turn — the agent
+# already has the original task prompt + its response in context. The SOUL.md
+# tells it how to behave for follow-ups (re-fetch sources, stay terse, cite).
+#
+# Add a `[[tasks]] on_message = true` block here only if you want a strict
+# inbound-message protocol (e.g. a triage prompt that runs on every reply).

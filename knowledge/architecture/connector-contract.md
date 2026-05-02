@@ -14,6 +14,17 @@ Every connector implements `Connector` from `src/connectors/connector.ts` and ob
 4. **All connector calls (send + receive) emit one audit-log record.** Connectors call into `audit-log.ts` directly; this is the only "core" service they're allowed to touch.
 5. **Tokens come from `state/secrets/_connectors/<id>/`, never from `process.env`.** This keeps the open-source `.env.example` clean and allows per-connector rotation.
 
+## Inbound message dispatch (no on_message task required)
+
+When an `InboundEvent` arrives, the daemon dispatches a reply WITHOUT requiring the agent to declare an `on_message` task:
+
+- **Thread reply with prior session** (Slack thread_ts maps to a stored sessionId) → `claude -p --resume <sessionId> "<user message>"`. The original cron task's prompt and the assistant's response are already in the session; nothing else needs prepending. The agent's SOUL drives reply behavior.
+- **Top-level @mention or no prior session** → fresh session: SOUL + framing + INDEX as the system prompt, user's message as the first user turn. No task body.
+
+The synthetic dispatch uses `taskId = "reply"`, the agent's `default_effort`, and a default `allowed_tools = ["Read", "Write", "WebFetch"]`. Audit log records read `task: "reply"` for these runs.
+
+**Advanced override** — declaring a `[[tasks]]` block with `on_message = true` substitutes that block's `prompt`, `effort`, `budget_usd`, and `allowed_tools` instead of the defaults. Use this only when you want a strict per-message protocol (e.g. a triage prompt that runs every reply).
+
 ## How it's enforced
 
 - TypeScript interface in `src/connectors/connector.ts`.

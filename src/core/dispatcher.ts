@@ -28,8 +28,13 @@ export interface DispatchInput {
   agentDir: string;
   agentName: string;
   taskId: string;
-  /** Path to the task prompt template (relative to agentDir or absolute). */
-  promptPath: string;
+  /**
+   * Path to the task prompt template (relative to agentDir or absolute).
+   * Optional: omit for inbound-message dispatches where the user's message is
+   * the entire prompt and no static task body applies (e.g. a Slack thread reply
+   * resuming the original session).
+   */
+  promptPath?: string;
   /** Optional per-task user prompt overlay (e.g. Slack message text). */
   userMessage?: string;
   effort: Effort;
@@ -76,8 +81,11 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
     taskId: input.taskId,
   });
 
-  const taskPrompt = await readTaskPrompt(input.agentDir, input.promptPath);
-  const userPrompt = composeUserPrompt(taskPrompt, input.userMessage);
+  const userPrompt = await composeUserPrompt({
+    agentDir: input.agentDir,
+    ...(input.promptPath !== undefined && { promptPath: input.promptPath }),
+    ...(input.userMessage !== undefined && { userMessage: input.userMessage }),
+  });
 
   const scratch = input.scratchDir ?? path.join(input.agentDir, ".verona-tmp");
   await mkdir(scratch, { recursive: true });
@@ -195,7 +203,28 @@ async function readTaskPrompt(agentDir: string, promptPath: string): Promise<str
   }
 }
 
-function composeUserPrompt(taskPrompt: string, userMessage?: string): string {
-  if (!userMessage) return taskPrompt;
-  return [taskPrompt, "", "## Current message", "", userMessage.trim()].join("\n");
+/**
+ * Compose the user-side prompt for the adapter.
+ *
+ *   promptPath + userMessage  → task body, then "## Current message" + user msg
+ *   promptPath only           → task body
+ *   userMessage only          → user msg verbatim (e.g. Slack reply resuming a session)
+ *
+ * Throws if both are absent — there's nothing to send.
+ */
+async function composeUserPrompt(input: {
+  agentDir: string;
+  promptPath?: string;
+  userMessage?: string;
+}): Promise<string> {
+  const taskPrompt = input.promptPath
+    ? await readTaskPrompt(input.agentDir, input.promptPath)
+    : null;
+  const msg = input.userMessage?.trim();
+  if (taskPrompt && msg) {
+    return [taskPrompt, "", "## Current message", "", msg].join("\n");
+  }
+  if (taskPrompt) return taskPrompt;
+  if (msg) return msg;
+  throw new ConfigError("dispatch requires either promptPath or userMessage (or both)");
 }

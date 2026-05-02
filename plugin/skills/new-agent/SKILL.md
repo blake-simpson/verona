@@ -18,7 +18,7 @@ If the user wants to start from a bundled template, run `verona agents init <nam
 3. **adapter** — one of `claude-cli` (default, subscription), `anthropic-api`, `openai`, `openrouter`. Recommend `claude-cli` unless the user has a specific reason.
 4. **default_effort** — `low` | `medium` | `high` | `max`. Recommend `medium`.
 5. **soul_traits** — 3–5 short traits (tone, voice, opinions). You'll expand these into a 200–500 word SOUL.md.
-6. **initial_tasks** — for each task ask: id, schedule (cron expression OR "every Nm/h/d") OR `on_message`, prompt summary.
+6. **initial_tasks** — cron tasks only by default. For each, ask: id, schedule (cron expression or `every Nm/h/d`), prompt summary. **Don't ask about `on_message`** — Slack/inbound replies just resume the prior session and need no task definition. Only suggest an `on_message = true` task if the user explicitly wants a strict per-message protocol (e.g. a triage prompt that must run on every reply).
 7. **slack** — optional. If yes, ask for the channel (e.g. `#research-feed`).
 
 ## Resolve target dir

@@ -27,5 +27,5 @@ Keep each file ≤100 lines. Split if growing.
 
 ## How to use this index
 
-- For `nightly-scan`: read `learned/facts/tracked-projects/` (if any) to dedupe before writing new findings.
-- For `deep-dive`: identify the project from the user's message, then read `learned/facts/tracked-projects/<that-project>.md` BEFORE web-fetching.
+- For `nightly-scan` (cron): read `learned/facts/tracked-projects/` (if any) to dedupe before writing new findings.
+- For thread replies (no separate task — you'll see the prior digest in the conversation): identify which project the user is asking about, then read `learned/facts/tracked-projects/<that-project>.md` BEFORE web-fetching. Don't paraphrase the digest you already posted — re-open the source.

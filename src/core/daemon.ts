@@ -204,9 +204,18 @@ export class Daemon {
   }
 
   /**
-   * Inbound entry point — connectors call this via ctx.deliver. Routes to the
-   * agent's on_message task, resumes the prior session if one exists, and
-   * posts the response back via the originating connector.
+   * Inbound entry point — connectors call this via ctx.deliver.
+   *
+   * Default behavior (no on_message task):
+   *   thread reply → resume the prior session, user's message is the next turn
+   *   top-level mention → start a fresh session with SOUL + framing + INDEX as
+   *                        system prompt, user's message is the first user turn
+   *
+   * Advanced override: an agent can declare a `[[tasks]]` block with
+   * `on_message = true` to enforce a specific protocol on every inbound
+   * message (the task prompt body prepends to each user message).
+   *
+   * Either way, the response posts back via the originating connector.
    */
   async handleInbound(event: InboundEvent): Promise<void> {
     const agentName = event.agentTarget;
@@ -221,13 +230,10 @@ export class Daemon {
       process.stderr.write(`[${event.connectorId}] no registered agent "${agentName}"; ignoring\n`);
       return;
     }
+
+    // Optional override: any [[tasks]] block with `on_message = true`.
+    // If absent, we still respond — replies just resume / start fresh.
     const onMsgTask = agent.config.tasks.find((t) => t.on_message === true);
-    if (!onMsgTask) {
-      process.stderr.write(
-        `[${event.connectorId}] agent "${agentName}" has no on_message task; ignoring\n`,
-      );
-      return;
-    }
 
     const threadKey = event.threadKey;
     const sessionId = threadKey ? await this.sessionStore.getSession(agentName, threadKey) : null;
@@ -238,13 +244,19 @@ export class Daemon {
     const adapter = this.adapters.get(adapterId);
     if (!adapter) throw new ConfigError(`adapter "${adapterId}" not registered`);
 
-    const effort = onMsgTask.effort ?? agent.config.agent.default_effort;
+    const taskId = onMsgTask?.id ?? "reply";
+    const effort = onMsgTask?.effort ?? agent.config.agent.default_effort;
+    // Defaults for replies when no on_message task is configured. Read+Write+
+    // WebFetch covers the common cases (look at memory, append episodic, fetch
+    // a URL the user mentioned). The agent's SOUL drives behavior, not a task.
+    const defaultReplyTools = ["Read", "Write", "WebFetch"] as const;
+    const allowedTools = onMsgTask?.allowed_tools ?? defaultReplyTools;
+    const budgetUsd = onMsgTask?.budget_usd;
 
     const result = await dispatch({
       agentDir: agent.agentDir,
       agentName,
-      taskId: onMsgTask.id,
-      promptPath: onMsgTask.prompt,
+      taskId,
       effort,
       trigger,
       adapter,
@@ -252,9 +264,10 @@ export class Daemon {
       auditLog: this.auditLog,
       runId,
       userMessage: event.text,
+      ...(onMsgTask?.prompt !== undefined && { promptPath: onMsgTask.prompt }),
       ...(sessionId !== null && { sessionId }),
-      ...(onMsgTask.budget_usd !== undefined && { budgetUsd: onMsgTask.budget_usd }),
-      ...(onMsgTask.allowed_tools && { allowedTools: onMsgTask.allowed_tools }),
+      ...(budgetUsd !== undefined && { budgetUsd }),
+      allowedTools,
     });
 
     if (result.response.sessionId && threadKey) {

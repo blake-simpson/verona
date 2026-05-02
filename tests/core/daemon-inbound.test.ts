@@ -6,7 +6,7 @@
  *     → all three records share the same runId
  */
 
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,7 +28,9 @@ let agentSrcDir: string;
 
 async function buildSlackEnabledFixture(): Promise<string> {
   const dir = await mkdtemp(path.join(tmpdir(), "verona-fixture-slack-"));
-  // copy hello-world fixture, then patch agent.toml to add Slack + on_message task
+  // Copy hello-world fixture, then patch agent.toml to declare a Slack
+  // channel. Notably: NO on_message task — replies should still flow via
+  // session resume / synthetic "reply" dispatch.
   const cp = (await import("node:fs/promises")).cp;
   await cp(FIXTURE_HELLO_BASE, dir, { recursive: true });
   const slackToml = `
@@ -53,20 +55,8 @@ id = "greet"
 prompt = "./tasks/greet.md"
 schedule = "0 9 * * *"
 effort = "low"
-
-[[tasks]]
-id = "reply"
-prompt = "./tasks/reply.md"
-on_message = true
-effort = "low"
 `;
   await writeFile(path.join(dir, "agent.toml"), `${slackToml.trim()}\n`, "utf8");
-  await mkdir(path.join(dir, "tasks"), { recursive: true });
-  await writeFile(
-    path.join(dir, "tasks", "reply.md"),
-    "Reply succinctly to the user message.",
-    "utf8",
-  );
   return dir;
 }
 
@@ -174,6 +164,11 @@ describe("Daemon inbound flow (Slack mocked)", () => {
 
     const runIds = new Set(records.map((r) => r.runId));
     expect(runIds.size).toBe(1);
+
+    // No on_message task was configured, so the synthetic taskId is "reply".
+    const adapterRec = records.find((r) => r.type === "adapter_invocation");
+    expect(adapterRec.task).toBe("reply");
+    expect(adapterRec.agent).toBe("hello-world");
 
     await daemon.stop();
   });
