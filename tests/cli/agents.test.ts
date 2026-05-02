@@ -4,9 +4,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { simpleGit } from "simple-git";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runAgentsAdd, runAgentsInit, runAgentsList } from "../../src/cli/commands/agents.js";
+import {
+  runAgentsAdd,
+  runAgentsInit,
+  runAgentsList,
+  runAgentsRemove,
+} from "../../src/cli/commands/agents.js";
 import { runInit } from "../../src/cli/commands/init.js";
-import { ConfigError } from "../../src/util/errors.js";
+import { ConfigError, StateError } from "../../src/util/errors.js";
 
 const FIXTURE_HELLO = path.resolve(
   fileURLToPath(import.meta.url),
@@ -44,6 +49,29 @@ describe("verona agents add", () => {
     await runAgentsAdd({ sourceDir: FIXTURE_HELLO, stateDir });
     const list = await runAgentsList({ stateDir });
     expect(list).toEqual(["hello-world"]);
+  });
+});
+
+describe("verona agents remove", () => {
+  it("removes the state-tree dir and commits the deletion", async () => {
+    await runAgentsAdd({ sourceDir: FIXTURE_HELLO, stateDir });
+    expect(await runAgentsList({ stateDir })).toEqual(["hello-world"]);
+
+    const result = await runAgentsRemove({ name: "hello-world", stateDir });
+    expect(result.agentName).toBe("hello-world");
+    expect(result.commit).toBeTruthy();
+
+    expect(await runAgentsList({ stateDir })).toEqual([]);
+
+    const log = await simpleGit(stateDir).log();
+    expect(log.latest?.message).toContain("remove agent hello-world");
+
+    // the dir is gone from the state tree
+    await expect(stat(path.join(stateDir, "agents", "hello-world"))).rejects.toThrow();
+  });
+
+  it("throws StateError if the agent isn't registered", async () => {
+    await expect(runAgentsRemove({ name: "ghost", stateDir })).rejects.toBeInstanceOf(StateError);
   });
 });
 

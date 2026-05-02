@@ -7,6 +7,7 @@
  *   → register handlers (SIGINT/SIGTERM) → start scheduler → idle until signal
  */
 
+import { rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ulid } from "ulidx";
 import type { AIAdapter } from "../adapters/adapter.js";
@@ -60,17 +61,47 @@ export class Daemon {
   }
 
   /**
-   * Run until SIGINT/SIGTERM. Resolves once the daemon has stopped cleanly.
+   * Run until SIGINT/SIGTERM. Caller is responsible for `bootstrap()` and
+   * `start()` first (see `runDaemonCmd`). Resolves once the daemon stops.
+   *
+   * Side effects: writes a pidfile to `state/daemon.pid` so `verona reload`
+   * can find this process; installs SIGHUP handler that re-reads agent
+   * configs and re-applies the schedule.
    */
   async run(): Promise<void> {
-    await this.bootstrap();
+    if (!this.scheduler) {
+      throw new ConfigError(
+        "daemon.run() called before bootstrap()/start(); use runDaemonCmd or call bootstrap+start first",
+      );
+    }
+    await this.writePidFile();
     this.installSignalHandlers();
     process.stdout.write(
-      `verona daemon: started; state dir = ${this.stateDir}; ${this.scheduler?.list().length ?? 0} scheduled jobs\n`,
+      `verona daemon: started (pid ${process.pid}); state dir = ${this.stateDir}; ${this.scheduler.list().length} scheduled jobs\n`,
     );
     await new Promise<void>((resolve) => {
       this.onShutdown = resolve;
     });
+  }
+
+  /**
+   * Re-read every registered agent's config and re-apply the schedule.
+   * Triggered by SIGHUP or programmatically. Does NOT restart connectors —
+   * Slack token / channel-mapping changes still require a full daemon
+   * restart (Socket Mode WebSocket is bound at startup).
+   */
+  async reload(): Promise<void> {
+    if (!this.scheduler) {
+      throw new ConfigError("daemon.reload() called before bootstrap()");
+    }
+    process.stdout.write("verona daemon: reload requested; re-reading agents…\n");
+    this.agents = await this.loadAgents();
+    this.scheduler.setAgents(this.agents);
+    // New jobs created by setAgents respect this.started — already true here —
+    // so they're created unpaused and start firing on the next cron tick.
+    process.stdout.write(
+      `verona daemon: reloaded; ${this.scheduler.list().length} scheduled jobs\n`,
+    );
   }
 
   private onShutdown: (() => void) | undefined = undefined;
@@ -246,10 +277,13 @@ export class Daemon {
 
     const taskId = onMsgTask?.id ?? "reply";
     const effort = onMsgTask?.effort ?? agent.config.agent.default_effort;
-    // Defaults for replies when no on_message task is configured. Read+Write+
-    // WebFetch covers the common cases (look at memory, append episodic, fetch
-    // a URL the user mentioned). The agent's SOUL drives behavior, not a task.
-    const defaultReplyTools = ["Read", "Write", "WebFetch"] as const;
+    // Defaults for replies when no on_message task is configured. WebSearch
+    // sits alongside WebFetch because research-style replies usually need
+    // both (search to discover, fetch to read). The agent's SOUL drives
+    // behavior, not a task. If a specific agent shouldn't have a tool here,
+    // that's an override case — declare an [[tasks]] on_message=true block
+    // with a narrower allowed_tools.
+    const defaultReplyTools = ["Read", "Write", "WebFetch", "WebSearch"] as const;
     const allowedTools = onMsgTask?.allowed_tools ?? defaultReplyTools;
     const budgetUsd = onMsgTask?.budget_usd;
 
@@ -304,8 +338,23 @@ export class Daemon {
     for (const c of this.connectors.values()) {
       if (c.stop) await c.stop();
     }
+    await this.removePidFile();
     this.removeSignalHandlers();
     this.onShutdown?.();
+  }
+
+  private async writePidFile(): Promise<void> {
+    const file = statePaths(this.stateDir).daemonPid;
+    await writeFile(file, `${process.pid}\n`, "utf8");
+  }
+
+  private async removePidFile(): Promise<void> {
+    const file = statePaths(this.stateDir).daemonPid;
+    try {
+      await rm(file, { force: true });
+    } catch {
+      // ignore — best-effort cleanup
+    }
   }
 
   scheduler_(): Scheduler {
@@ -369,14 +418,22 @@ export class Daemon {
   }
 
   private installSignalHandlers(): void {
-    const handler = () => {
+    const shutdown = () => {
       process.stdout.write("verona daemon: shutting down…\n");
       void this.stop();
     };
     for (const sig of ["SIGINT", "SIGTERM"] as const) {
-      this.signalHandlers.set(sig, handler);
-      process.on(sig, handler);
+      this.signalHandlers.set(sig, shutdown);
+      process.on(sig, shutdown);
     }
+    const reload = () => {
+      void this.reload().catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        process.stderr.write(`verona daemon: reload failed — ${msg}\n`);
+      });
+    };
+    this.signalHandlers.set("SIGHUP", reload);
+    process.on("SIGHUP", reload);
   }
 
   private removeSignalHandlers(): void {

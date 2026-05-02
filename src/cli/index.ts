@@ -5,7 +5,7 @@
 
 import path from "node:path";
 import { Command } from "commander";
-import { runAgentsAdd, runAgentsInit, runAgentsList } from "./commands/agents.js";
+import { runAgentsAdd, runAgentsInit, runAgentsList, runAgentsRemove } from "./commands/agents.js";
 import { runConnectorsAdd, runConnectorsTest } from "./commands/connectors.js";
 import { runCosts } from "./commands/costs.js";
 import { runDaemonCmd } from "./commands/daemon.js";
@@ -13,6 +13,7 @@ import { formatDoctorReport, runDoctor } from "./commands/doctor.js";
 import { describeInit, runInit } from "./commands/init.js";
 import { runInvocations } from "./commands/invocations.js";
 import { formatLogList, listLogs, readLatestLog } from "./commands/logs.js";
+import { runReload } from "./commands/reload.js";
 import { runScheduleList, runScheduleNext, runScheduleRun } from "./commands/schedule.js";
 
 export async function main(argv: string[] = process.argv): Promise<number> {
@@ -104,11 +105,40 @@ export async function main(argv: string[] = process.argv): Promise<number> {
       for (const name of names) process.stdout.write(`${name}\n`);
     });
 
+  agents
+    .command("remove <name>")
+    .description(
+      "remove an agent from the state tree (DELETES its memory; run `verona reload` after to drop its schedule from a running daemon)",
+    )
+    .action(async (name: string) => {
+      const result = await runAgentsRemove({
+        name,
+        stateDir: program.opts().stateDir,
+      });
+      const commitNote = result.commit
+        ? ` (commit ${result.commit.slice(0, 8)})`
+        : " (no commit — was already absent from git)";
+      process.stdout.write(`removed ${result.agentName} → ${result.removedDir}${commitNote}\n`);
+      process.stdout.write(
+        "Note: a running daemon won't drop the schedule until you run `verona reload` or restart it.\n",
+      );
+    });
+
   program
     .command("daemon")
     .description("run the long-lived daemon (scheduler + future connectors)")
     .action(async () => {
       await runDaemonCmd({ stateDir: program.opts().stateDir });
+    });
+
+  program
+    .command("reload")
+    .description(
+      "signal a running daemon to re-read agent configs (SIGHUP). connectors / Slack tokens still require a full restart.",
+    )
+    .action(async () => {
+      const result = await runReload({ stateDir: program.opts().stateDir });
+      process.stdout.write(`signaled daemon (pid ${result.pid}) to reload\n`);
     });
 
   const schedule = program.command("schedule").description("inspect and trigger task schedules");

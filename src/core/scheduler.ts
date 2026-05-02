@@ -64,13 +64,13 @@ export class Scheduler {
         if (!task.schedule) continue;
         let cron: Cron;
         try {
-          cron = new Cron(
-            task.schedule,
-            { paused: !this.started, name: `${a.agentName}:${task.id}` },
-            () => {
-              void this.fire(a.agentName, task.id, task.schedule!);
-            },
-          );
+          // Don't pass `name` — croner v9 keeps named jobs in a global
+          // registry that .stop() doesn't always free, so a re-setAgents()
+          // (e.g. config reload) trips "name already taken". We track jobs in
+          // this.jobs ourselves, so the named-registry adds nothing.
+          cron = new Cron(task.schedule, { paused: !this.started }, () => {
+            void this.fire(a.agentName, task.id, task.schedule!);
+          });
         } catch (err) {
           throw new ScheduleError(
             `invalid schedule "${task.schedule}" for ${a.agentName}:${task.id}`,

@@ -7,7 +7,7 @@
  * copies a bundled template into the user-agents dir and rewrites agent.name.
  */
 
-import { cp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { loadAgentConfig } from "../config/loader.js";
 import { ConfigError, StateError } from "../util/errors.js";
@@ -116,6 +116,21 @@ async function dirExists(p: string): Promise<boolean> {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return false;
     throw err;
   }
+}
+
+/**
+ * Remove an agent from the state tree. DELETES the agent's memory tree
+ * (state/agents/<name>/), so this is destructive. Recoverable via the state
+ * dir's git history (the caller — runAgentsRemove — commits the deletion).
+ */
+export async function removeRegisteredAgent(stateDir: string, agentName: string): Promise<void> {
+  const dir = stateAgentDir(stateDir, agentName);
+  if (!(await dirExists(dir))) {
+    throw new StateError(
+      `agent "${agentName}" is not registered (no ${dir})`,
+    );
+  }
+  await rm(dir, { recursive: true, force: true });
 }
 
 export async function listRegisteredAgents(stateDir: string): Promise<string[]> {

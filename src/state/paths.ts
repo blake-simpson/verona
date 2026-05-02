@@ -25,6 +25,8 @@ export interface StatePaths {
   invocations: string;
   costs: string;
   veronaToml: string;
+  /** Pidfile written by `verona daemon` so `verona reload` can find it. */
+  daemonPid: string;
 }
 
 export function resolveStateDir(override?: string): string {
@@ -46,6 +48,7 @@ export function statePaths(stateDir: string): StatePaths {
     invocations: path.join(root, "invocations.ndjson"),
     costs: path.join(root, "costs"),
     veronaToml: path.join(root, "verona.toml"),
+    daemonPid: path.join(root, "daemon.pid"),
   };
 }
 

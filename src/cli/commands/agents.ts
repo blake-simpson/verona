@@ -4,6 +4,7 @@ import { GitRecorder } from "../../core/git-recorder.js";
 import {
   listRegisteredAgents,
   registerAgent,
+  removeRegisteredAgent,
   scaffoldAgentFromTemplate,
 } from "../../state/agent-registry.js";
 import { resolveAgentsDir, resolveStateDir, userAgentDir } from "../../state/paths.js";
@@ -53,6 +54,40 @@ export interface AgentsListOptions {
 export async function runAgentsList(opts: AgentsListOptions = {}): Promise<string[]> {
   const stateDir = resolveStateDir(opts.stateDir);
   return listRegisteredAgents(stateDir);
+}
+
+export interface AgentsRemoveOptions {
+  name: string;
+  stateDir?: string;
+}
+
+export interface AgentsRemoveResult {
+  agentName: string;
+  removedDir: string;
+  commit: string | null;
+}
+
+/**
+ * Remove an agent from the state tree. DELETES the agent's memory.
+ * Recoverable via the state dir's git history (the deletion is committed).
+ *
+ * Note: a running daemon won't drop the agent's schedule until it's reloaded
+ * (`verona reload`) or restarted.
+ */
+export async function runAgentsRemove(opts: AgentsRemoveOptions): Promise<AgentsRemoveResult> {
+  const stateDir = resolveStateDir(opts.stateDir);
+  const removedDir = path.join(stateDir, "agents", opts.name);
+  await removeRegisteredAgent(stateDir, opts.name);
+
+  const recorder = new GitRecorder({ stateDir });
+  await recorder.ensureRepo();
+  const commit = await recorder.commit({
+    message: `verona: remove agent ${opts.name}`,
+    paths: [path.join("agents", opts.name)],
+    skipIfClean: true,
+  });
+
+  return { agentName: opts.name, removedDir, commit };
 }
 
 const NAME_RE = /^[a-z][a-z0-9-]*$/;
