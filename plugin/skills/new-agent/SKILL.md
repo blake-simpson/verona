@@ -41,6 +41,21 @@ Refuse to overwrite if `target_dir` already exists. Suggest a different name.
 3. Run `verona agents add <target_dir>` to register it in the state dir. Skip this step if `verona doctor` reports the state dir is missing — point the user at `verona init` first.
 4. Print a short next-steps list: register adapter API keys (if non-claude-cli), `verona connectors add slack` (if slack), `verona schedule run <name>:<task>` for a smoke test.
 
+## Tool allowlist guidance
+
+`claude -p` denies any tool not listed in `allowed_tools`. Pick the smallest set that covers the task. Common combinations:
+
+| Use case | `allowed_tools` |
+|---|---|
+| Smoke test / minimal | `["Read", "Write"]` |
+| Research / news / monitoring | `["Read", "Write", "WebFetch", "WebSearch"]` |
+| Document / code editing on memory | `["Read", "Write", "Edit"]` |
+| Anything that needs shell | add `"Bash(curl:*)"` (or specific subcommands) — never bare `"Bash"` for an always-running agent |
+
+Do **NOT** include `WebFetch` without `WebSearch` for a research-style task. WebFetch reads a known URL; WebSearch finds pages by topic. Most research workflows need both. The bundled `researcher` template includes both.
+
+If the user asks "why didn't the agent search the web," the most likely cause is that `WebSearch` is missing from `allowed_tools` — check that first.
+
 ## Things to NOT do
 
 - **Don't write into `agents/examples/`** — that's the source repo's read-only template tree.

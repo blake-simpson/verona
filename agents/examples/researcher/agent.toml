@@ -22,7 +22,10 @@ id = "nightly-scan"
 prompt = "./tasks/nightly-scan.md"
 schedule = "0 3 * * *"
 effort = "high"
-allowed_tools = ["Read", "Write", "WebFetch"]
+# WebSearch finds pages by topic; WebFetch reads a specific URL. A research
+# task usually needs both: search to discover candidates, fetch to read the
+# primary source. Read/Write are for memory I/O.
+allowed_tools = ["Read", "Write", "WebFetch", "WebSearch"]
 
 # Slack thread replies don't need a separate task. When you @-mention this
 # agent in the channel where it posted a digest, the daemon resumes the same
