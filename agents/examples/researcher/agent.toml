@@ -1,0 +1,32 @@
+[agent]
+name = "researcher"
+description = "Scans the web nightly for trends in AI coding tools, posts a digest to Slack, and answers follow-ups in thread."
+adapter = "claude-cli"
+default_effort = "medium"
+
+[soul]
+file = "./SOUL.md"
+
+[memory]
+index = "./memory/INDEX.md"
+self_learning = true
+episodic_retention_days = 60
+working_retention_days = 7
+
+[connectors]
+# Replace `#research-feed` with the actual channel id or "#name" for your workspace.
+slack = { channel = "#research-feed" }
+
+[[tasks]]
+id = "nightly-scan"
+prompt = "./tasks/nightly-scan.md"
+schedule = "0 3 * * *"
+effort = "high"
+allowed_tools = ["Read", "Write", "WebFetch"]
+
+[[tasks]]
+id = "deep-dive"
+prompt = "./tasks/deep-dive.md"
+on_message = true
+effort = "high"
+allowed_tools = ["Read", "Write", "WebFetch"]

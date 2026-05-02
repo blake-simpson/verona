@@ -1,0 +1,22 @@
+[agent]
+name = "hello-world"
+description = "Smoke-test agent. Confirms Verona's pipes are connected end-to-end."
+adapter = "claude-cli"
+default_effort = "low"
+
+[soul]
+file = "./SOUL.md"
+
+[memory]
+index = "./memory/INDEX.md"
+self_learning = true
+episodic_retention_days = 7
+working_retention_days = 1
+
+[connectors]
+
+[[tasks]]
+id = "greet"
+prompt = "./tasks/greet.md"
+schedule = "0 9 * * *"
+effort = "low"
