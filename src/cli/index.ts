@@ -3,8 +3,9 @@
  * to it.
  */
 
+import path from "node:path";
 import { Command } from "commander";
-import { runAgentsAdd, runAgentsList } from "./commands/agents.js";
+import { runAgentsAdd, runAgentsInit, runAgentsList } from "./commands/agents.js";
 import { runConnectorsAdd, runConnectorsTest } from "./commands/connectors.js";
 import { runCosts } from "./commands/costs.js";
 import { runDaemonCmd } from "./commands/daemon.js";
@@ -47,6 +48,36 @@ export async function main(argv: string[] = process.argv): Promise<number> {
   const agents = program
     .command("agents")
     .description("manage agent registrations in the state dir");
+
+  agents
+    .command("init <name>")
+    .description(
+      "scaffold a new agent in your user-agents dir from a bundled template (does NOT register; run `agents add` after reviewing)",
+    )
+    .requiredOption(
+      "-t, --template <template>",
+      "template to copy from (e.g. hello-world, researcher)",
+    )
+    .option("--agents-dir <path>", "override the user-agents dir (default: ~/.verona/agents)")
+    .action(async (name: string, cmdOpts: { template: string; agentsDir?: string }) => {
+      const result = await runAgentsInit({
+        name,
+        template: cmdOpts.template,
+        ...(cmdOpts.agentsDir !== undefined && { agentsDir: cmdOpts.agentsDir }),
+      });
+      process.stdout.write(
+        [
+          `scaffolded ${result.agentName} from template "${path.basename(result.templateDir)}"`,
+          `  target:   ${result.targetDir}`,
+          `  template: ${result.templateDir}`,
+          "",
+          "Next:",
+          `  $EDITOR ${result.targetDir}    # review SOUL.md, agent.toml, tasks/`,
+          `  verona agents add ${result.targetDir}`,
+          "",
+        ].join("\n"),
+      );
+    });
 
   agents
     .command("add <source-dir>")

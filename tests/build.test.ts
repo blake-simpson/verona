@@ -33,6 +33,9 @@ afterEach(async () => {
   await rm(outDir, { recursive: true, force: true });
 });
 
+// `agents/examples/` IS shipped (templates for `verona agents init`); the
+// rest of agents/ never exists in source so the only thing under it is
+// `examples/`. Bare `agents` therefore isn't forbidden.
 const FORBIDDEN_PATHS = [
   "knowledge",
   "AGENTS.md",
@@ -40,7 +43,6 @@ const FORBIDDEN_PATHS = [
   "src",
   "tests",
   "scripts",
-  "agents",
   ".env",
   ".env.example",
   "state",
@@ -53,6 +55,7 @@ const FORBIDDEN_PATHS = [
   "plugin",
   "marketplace.json",
   ".claude",
+  ".claude-plugin",
 ];
 
 const REQUIRED_FILES = [
@@ -65,6 +68,12 @@ const REQUIRED_FILES = [
   "LICENSE",
   "README.md",
   "package.json",
+  // Templates ship so `verona agents init <name> --template <example>`
+  // works on a host that only has the runtime artifact.
+  "agents/examples/hello-world/agent.toml",
+  "agents/examples/hello-world/SOUL.md",
+  "agents/examples/researcher/agent.toml",
+  "agents/examples/researcher/SOUL.md",
 ];
 
 describe("verona build", () => {

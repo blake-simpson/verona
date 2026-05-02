@@ -2,6 +2,9 @@
  * Agent registry — mirrors source agent dirs into <state>/agents/<name>/ at
  * initial registration. On re-add, never clobbers an existing memory/learned/
  * tree (that's the agent's persistent state).
+ *
+ * Also exposes scaffoldAgentFromTemplate() for `verona agents init`, which
+ * copies a bundled template into the user-agents dir and rewrites agent.name.
  */
 
 import { cp, mkdir, readFile, stat, writeFile } from "node:fs/promises";
@@ -124,6 +127,61 @@ export async function listRegisteredAgents(stateDir: string): Promise<string[]> 
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
     throw err;
   }
+}
+
+/**
+ * Scaffold a new agent dir by copying a template (e.g. agents/examples/researcher)
+ * into the user-agents tree, then rewriting `[agent].name` to match the new
+ * dir name. Refuses to clobber an existing target.
+ */
+export interface ScaffoldAgentInput {
+  /** Absolute path to the source template, e.g. <verona-root>/agents/examples/researcher. */
+  templateDir: string;
+  /** Absolute path to the target dir, e.g. <agentsDir>/<new-name>. */
+  targetDir: string;
+  /** New agent name; written into the copied agent.toml. */
+  newAgentName: string;
+}
+
+export async function scaffoldAgentFromTemplate(input: ScaffoldAgentInput): Promise<void> {
+  if (!(await dirExists(input.templateDir))) {
+    throw new ConfigError(`template not found at ${input.templateDir}`);
+  }
+  if (await dirExists(input.targetDir)) {
+    throw new ConfigError(
+      `agent dir already exists at ${input.targetDir}; pick a different name or remove the existing dir first`,
+    );
+  }
+  await mkdir(path.dirname(input.targetDir), { recursive: true });
+  await cp(input.templateDir, input.targetDir, { recursive: true });
+
+  const tomlPath = path.join(input.targetDir, "agent.toml");
+  if (await fileExists(tomlPath)) {
+    const raw = await readFile(tomlPath, "utf8");
+    await writeFile(tomlPath, rewriteAgentName(raw, input.newAgentName), "utf8");
+  }
+}
+
+/**
+ * Replace the `name = "..."` value within the [agent] section of a TOML file.
+ * Walks lines so we don't accidentally touch `name` keys in [[tasks]] blocks.
+ */
+function rewriteAgentName(toml: string, newName: string): string {
+  const lines = toml.split("\n");
+  let inAgent = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const trimmed = line.trim();
+    if (trimmed.startsWith("[")) {
+      inAgent = trimmed === "[agent]";
+      continue;
+    }
+    if (inAgent && /^\s*name\s*=/.test(line)) {
+      lines[i] = line.replace(/=\s*"[^"]*"/, `= "${newName}"`);
+      return lines.join("\n");
+    }
+  }
+  throw new ConfigError("template agent.toml has no [agent].name field to rewrite");
 }
 
 export async function readRegisteredAgentToml(

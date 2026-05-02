@@ -1,10 +1,14 @@
 /**
- * Resolves the runtime state dir. Default: ~/.verona/state. Override via
- * VERONA_STATE_DIR. The state dir holds memory, secrets, sessions, logs, and
- * its own .git — it lives outside the deploy tree so `verona deploy` never
- * clobbers it.
+ * Path resolution for Verona's THREE trees:
  *
- * See knowledge/architecture/two-tree-deploy.md for the full layout contract.
+ *   1. Source tree   — this repo (code + read-only example templates).
+ *   2. User agents   — where YOUR agent definitions live. Default
+ *                       ~/.verona/agents/<name>/. Override via VERONA_AGENTS_DIR.
+ *   3. Runtime state — memory, secrets, sessions, logs. Default
+ *                       ~/.verona/state/. Override via VERONA_STATE_DIR.
+ *
+ * Trees 2 and 3 live outside the deploy tree so `verona deploy` / `git pull`
+ * never clobbers them. See knowledge/architecture/two-tree-deploy.md.
  */
 
 import { homedir } from "node:os";
@@ -47,4 +51,20 @@ export function statePaths(stateDir: string): StatePaths {
 
 export function agentDir(stateDir: string, agentName: string): string {
   return path.join(stateDir, "agents", agentName);
+}
+
+/**
+ * Resolves the user-agents dir. Default: ~/.verona/agents/. Override via
+ * VERONA_AGENTS_DIR. This is where YOUR (the user's) agent definitions live —
+ * separate from the source repo's read-only `agents/examples/` templates and
+ * separate from the runtime `state/` tree.
+ */
+export function resolveAgentsDir(override?: string): string {
+  if (override) return path.resolve(override);
+  if (process.env.VERONA_AGENTS_DIR) return path.resolve(process.env.VERONA_AGENTS_DIR);
+  return path.join(homedir(), ".verona", "agents");
+}
+
+export function userAgentDir(agentsDir: string, name: string): string {
+  return path.join(agentsDir, name);
 }

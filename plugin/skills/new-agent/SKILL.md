@@ -1,11 +1,15 @@
 ---
 name: new-agent
-description: Scaffold a new Verona agent under agents/examples/<name>/ with SOUL.md, tasks/, memory/INDEX.md, and a valid agent.toml. Use when the user wants to create a new agent.
+description: Scaffold a new Verona agent in the user-agents dir (default ~/.verona/agents/<name>/) with SOUL.md, tasks/, memory/INDEX.md, and a valid agent.toml. Use when the user wants to create a new agent.
 ---
 
 # /verona:new-agent
 
-Create a new Verona agent. Before writing files, gather the inputs below from the user — ask short, concrete questions, one or two at a time. Don't make up values.
+Create a new Verona agent in the **user-agents dir** (default `~/.verona/agents/<name>/`, override via `$VERONA_AGENTS_DIR`).
+
+**DO NOT write to `agents/examples/` in the Verona source repo.** That dir holds read-only canonical templates. The user's own agents live separately so `git pull` of Verona never touches them.
+
+If the user wants to start from a bundled template, run `verona agents init <name> --template <template>` (CLI does the copy + name rewrite). Use this skill for from-scratch authoring or for guided customization beyond what `init` produces.
 
 ## Inputs
 
@@ -17,21 +21,31 @@ Create a new Verona agent. Before writing files, gather the inputs below from th
 6. **initial_tasks** — for each task ask: id, schedule (cron expression OR "every Nm/h/d") OR `on_message`, prompt summary.
 7. **slack** — optional. If yes, ask for the channel (e.g. `#research-feed`).
 
+## Resolve target dir
+
+```
+target_dir = $VERONA_AGENTS_DIR/<name>/    # if env var set
+           = ~/.verona/agents/<name>/      # otherwise
+```
+
+Refuse to overwrite if `target_dir` already exists. Suggest a different name.
+
 ## Steps
 
 1. Confirm all inputs. Show a one-paragraph summary back to the user before writing anything.
-2. Create `agents/examples/<name>/` with:
-   - `agent.toml` (use the schema from `src/config/schema.ts`)
-   - `SOUL.md` (200–500 words; OpenClaw style — specificity > generality, real opinions over safe positions)
-   - `tasks/<task-id>.md` for each declared task — single-line title + body explaining what the task should do, what tools it can use, what it should write to memory
-   - `memory/INDEX.md` (initial empty routing table; refer to existing examples)
-3. Run `verona agents add agents/examples/<name>` to register it in the state dir (only if state dir is initialized — check `verona doctor` first).
+2. Create `<target_dir>/` with:
+   - `agent.toml` — schema in `src/config/schema.ts`
+   - `SOUL.md` — 200–500 words; OpenClaw style (specificity > generality, real opinions over safe positions)
+   - `tasks/<task-id>.md` for each declared task — title + body explaining the task's goal, allowed tools, what to write to memory
+   - `memory/INDEX.md` — initial routing table (mirror the structure of `agents/examples/*/memory/INDEX.md`)
+3. Run `verona agents add <target_dir>` to register it in the state dir. Skip this step if `verona doctor` reports the state dir is missing — point the user at `verona init` first.
 4. Print a short next-steps list: register adapter API keys (if non-claude-cli), `verona connectors add slack` (if slack), `verona schedule run <name>:<task>` for a smoke test.
 
 ## Things to NOT do
 
-- Don't put real tokens, real API keys, or real Slack channel IDs in committed files.
-- Don't skip `agent.toml` validation — let `verona agents add` fail loudly if you got the schema wrong rather than papering over it.
+- **Don't write into `agents/examples/`** — that's the source repo's read-only template tree.
+- Don't put real tokens, API keys, or Slack channel IDs in committed files.
+- Don't skip `agent.toml` validation — let `verona agents add` fail loudly if you got the schema wrong.
 - Don't write to `state/` directly. Use the CLI.
 - Don't co-author commits.
 
@@ -40,11 +54,11 @@ Create a new Verona agent. Before writing files, gather the inputs below from th
 If the user asks for a smoke test, suggest:
 
 ```bash
-VERONA_CLAUDE_BIN="$(which claude)" verona schedule run <name>:<first-task-id>
+verona schedule run <name>:<first-task-id>
 verona logs <name> --latest
 ```
 
-If the agent uses Slack, walk them through:
+If the agent uses Slack:
 
 ```bash
 verona connectors add slack    # interactive token paste

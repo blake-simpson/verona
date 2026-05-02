@@ -36,21 +36,29 @@ You'll need:
 
 ## Quick start
 
-Register the bundled smoke-test agent and run it once:
+Verona has **three trees**: the source repo (this), your user-agents dir (default `~/.verona/agents/`), and the runtime state dir (default `~/.verona/state/`). Your own agents live in the user-agents dir — never edit `agents/examples/` directly, those are read-only templates.
+
+Scaffold the smoke-test agent and run it once:
 
 ```bash
-verona agents add ./agents/examples/hello-world
-verona schedule run hello-world:greet
-verona logs hello-world --latest
+verona agents init my-hello --template hello-world
+# scaffolded ~/.verona/agents/my-hello/
+
+verona agents add ~/.verona/agents/my-hello
+verona schedule run my-hello:greet
+verona logs my-hello --latest
 ```
 
-Wire up Slack for the bundled researcher agent:
+Wire up Slack and the researcher pattern:
 
 ```bash
 verona connectors add slack       # interactive: paste bot_token (xoxb-) and app_token (xapp-)
 verona connectors test slack --destination '#research-feed'
-verona agents add ./agents/examples/researcher
-verona schedule list              # shows nightly cron + on_message tasks
+
+verona agents init research-personal --template researcher
+$EDITOR ~/.verona/agents/research-personal       # tweak SOUL.md, schedule, sources
+verona agents add ~/.verona/agents/research-personal
+verona schedule list              # nightly cron + on_message tasks
 ```
 
 Run the daemon (foreground for now; install as a service via `deploy/README.md` for production):
@@ -66,6 +74,7 @@ verona init                                  # scaffold the state dir + git repo
 verona doctor                                # verify host readiness
 verona daemon                                # run the long-lived daemon
 
+verona agents init <name> --template <name>  # scaffold from a bundled template
 verona agents {add <path> | list}
 verona connectors {add <id> | test <id>}
 verona schedule {list | next | run <agent>:<task>}

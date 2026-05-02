@@ -7,13 +7,14 @@
  *   dist/                      # compiled JS
  *   dist/hooks/memory-guard.sh # hook script (literal copy from src)
  *   deploy/                    # service templates + deploy README
+ *   agents/examples/           # read-only templates for `verona agents init`
  *   package.json               # pruned: no devDependencies, no scripts
  *   LICENSE
  *   README.md                  # slim install-only version (NOT the dev README)
  *
  * EXCLUDED (and asserted absent in tests/build.test.ts):
  *   knowledge/, AGENTS.md, CLAUDE.md, src/, tests/, scripts/,
- *   agents/examples/, .env*, state/
+ *   plugin/, marketplace.json, .claude/, .claude-plugin/, .env*, state/
  *
  * Run:  npx tsx scripts/build.ts [--out <path>]
  */
@@ -84,6 +85,13 @@ export async function buildRuntime(opts: BuildOptions = {}): Promise<{ outDir: s
 
   // deploy/ (service templates + deploy README)
   await cp(path.join(REPO_ROOT, "deploy"), path.join(outDir, "deploy"), { recursive: true });
+
+  // agents/examples/ — read-only templates copied by `verona agents init`.
+  // Required at runtime so users on a deployed host (no source clone) can
+  // still scaffold from a template into their user-agents dir.
+  await cp(path.join(REPO_ROOT, "agents", "examples"), path.join(outDir, "agents", "examples"), {
+    recursive: true,
+  });
 
   // LICENSE + slim README
   await copyFile(path.join(REPO_ROOT, "LICENSE"), path.join(outDir, "LICENSE"));

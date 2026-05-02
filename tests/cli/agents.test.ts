@@ -1,11 +1,12 @@
-import { mkdtemp, rm, stat } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { simpleGit } from "simple-git";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { runAgentsAdd, runAgentsList } from "../../src/cli/commands/agents.js";
+import { runAgentsAdd, runAgentsInit, runAgentsList } from "../../src/cli/commands/agents.js";
 import { runInit } from "../../src/cli/commands/init.js";
+import { ConfigError } from "../../src/util/errors.js";
 
 const FIXTURE_HELLO = path.resolve(
   fileURLToPath(import.meta.url),
@@ -43,5 +44,82 @@ describe("verona agents add", () => {
     await runAgentsAdd({ sourceDir: FIXTURE_HELLO, stateDir });
     const list = await runAgentsList({ stateDir });
     expect(list).toEqual(["hello-world"]);
+  });
+});
+
+describe("verona agents init", () => {
+  let agentsDir: string;
+
+  beforeEach(async () => {
+    agentsDir = await mkdtemp(path.join(tmpdir(), "verona-init-agents-"));
+  });
+
+  afterEach(async () => {
+    await rm(agentsDir, { recursive: true, force: true });
+  });
+
+  it("scaffolds from the bundled hello-world template into the agents dir", async () => {
+    const result = await runAgentsInit({
+      name: "smoke-1",
+      template: "hello-world",
+      agentsDir,
+    });
+    expect(result.agentName).toBe("smoke-1");
+    expect(result.targetDir).toBe(path.join(agentsDir, "smoke-1"));
+
+    // Files copied
+    expect((await stat(path.join(result.targetDir, "agent.toml"))).isFile()).toBe(true);
+    expect((await stat(path.join(result.targetDir, "SOUL.md"))).isFile()).toBe(true);
+
+    // agent.toml's [agent].name was rewritten to the new name
+    const toml = await readFile(path.join(result.targetDir, "agent.toml"), "utf8");
+    expect(toml).toMatch(/\[agent\][\s\S]*?name = "smoke-1"/);
+    expect(toml).not.toMatch(/name = "hello-world"/);
+  });
+
+  it("scaffolds from the bundled researcher template", async () => {
+    const result = await runAgentsInit({
+      name: "research-personal",
+      template: "researcher",
+      agentsDir,
+    });
+    const toml = await readFile(path.join(result.targetDir, "agent.toml"), "utf8");
+    expect(toml).toMatch(/name = "research-personal"/);
+    // Researcher has [[tasks]] blocks with their own `id` field; rewrite must
+    // not touch those.
+    expect(toml).toMatch(/id = "nightly-scan"/);
+  });
+
+  it("refuses to clobber an existing target dir", async () => {
+    await runAgentsInit({ name: "dup", template: "hello-world", agentsDir });
+    await expect(
+      runAgentsInit({ name: "dup", template: "hello-world", agentsDir }),
+    ).rejects.toBeInstanceOf(ConfigError);
+  });
+
+  it("rejects an invalid agent name", async () => {
+    await expect(
+      runAgentsInit({ name: "Has Spaces", template: "hello-world", agentsDir }),
+    ).rejects.toBeInstanceOf(ConfigError);
+  });
+
+  it("rejects an unknown template", async () => {
+    await expect(
+      runAgentsInit({ name: "ok", template: "definitely-not-real", agentsDir }),
+    ).rejects.toBeInstanceOf(ConfigError);
+  });
+
+  it("respects VERONA_AGENTS_DIR env var when agentsDir is omitted", async () => {
+    const envDir = await mkdtemp(path.join(tmpdir(), "verona-init-env-"));
+    const prev = process.env.VERONA_AGENTS_DIR;
+    process.env.VERONA_AGENTS_DIR = envDir;
+    try {
+      const result = await runAgentsInit({ name: "from-env", template: "hello-world" });
+      expect(result.targetDir.startsWith(envDir)).toBe(true);
+    } finally {
+      if (prev === undefined) delete process.env.VERONA_AGENTS_DIR;
+      else process.env.VERONA_AGENTS_DIR = prev;
+      await rm(envDir, { recursive: true, force: true });
+    }
   });
 });

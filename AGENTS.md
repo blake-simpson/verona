@@ -2,16 +2,19 @@
 
 This file is the entry point for Claude Code (or any AI agent) working *on* the Verona codebase. Read it at the start of every session.
 
-## CRITICAL: Two knowledge contexts — don't confuse them
+## CRITICAL: Three trees — don't confuse them
 
-Verona has **two completely separate knowledge stores**. Mixing them is a load-bearing bug.
+Verona has three logical trees. Mixing them is a load-bearing bug.
 
-| Store | Location | Who reads it | Who writes it | Shipped? |
-|---|---|---|---|---|
-| **Dev-time knowledge** (this) | `./knowledge/` + `AGENTS.md` | Claude Code working on Verona | You / Claude Code amending in place | **NO — excluded from `verona build` artifact** |
-| **Agent runtime memory** | `<state>/agents/<name>/memory/` | The deployed worker agent | The agent itself + the human curator | Lives in the state dir, separate tree |
+| Tree | Location | Edited by | Shipped in `verona build` artifact? |
+|---|---|---|---|
+| **1. Source** (this) | this repo: `src/`, `knowledge/`, `agents/examples/`, `plugin/`, `deploy/`, `tests/` | Verona maintainers + Claude Code working on Verona | only `dist/`, `bin/`, `deploy/`, `agents/examples/`, `LICENSE`, slim `README.md` ship — `knowledge/`, `AGENTS.md`, `src/`, `tests/`, `scripts/`, `plugin/`, `marketplace.json`, `.claude/` are EXCLUDED |
+| **2. User agents** | `~/.verona/agents/<name>/` (override via `$VERONA_AGENTS_DIR`) | the user (you) — `verona agents init` scaffolds, then you edit | **n/a — lives outside this repo entirely** |
+| **3. Runtime state** | `~/.verona/state/` (override via `$VERONA_STATE_DIR`) — its own git repo | the daemon at runtime + memory-guard hook | **n/a — lives outside this repo entirely** |
 
-Worker agents at runtime get `--add-dir <state>/agents/<name>` and never see this directory. Don't tell them about it. Don't merge the patterns.
+`agents/examples/` in this repo is **read-only canonical templates**. Users copy them via `verona agents init <name> --template <template>` into their user-agents dir; never edit the bundled examples for personal use. `/verona:new-agent` writes to the user-agents dir, never to `agents/examples/`.
+
+Worker agents at runtime get `--add-dir <state>/agents/<name>` only. They never see `knowledge/`, `AGENTS.md`, the source repo, or other agents' state.
 
 ## Read this first when starting a session
 

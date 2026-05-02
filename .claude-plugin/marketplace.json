@@ -1,5 +1,6 @@
 {
   "name": "verona",
+  "description": "Verona authoring tools for Claude Code — slash commands that scaffold agents, tasks, connectors, and SOUL.md files.",
   "owner": {
     "name": "Blake Simpson"
   },
