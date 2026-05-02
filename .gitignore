@@ -8,16 +8,16 @@ verona-runtime.tar.gz
 *.tsbuildinfo
 
 # state — never commit a deployed agent's runtime state
-state/
+# anchored to repo root so we don't accidentally exclude src/state/ or tests/state/
+/state/
 .verona-state/
 
-# secrets
+# secrets (state/secrets/ is already covered above)
 .env
 .env.*
 !.env.example
 *.local.toml
 *.secret
-secrets/
 
 # logs
 *.log
