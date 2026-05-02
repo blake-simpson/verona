@@ -1,0 +1,43 @@
+{
+  "name": "verona",
+  "version": "0.0.0",
+  "description": "Self-hosted CLI framework for scheduled, self-learning AI agents with persistent memory and bidirectional comms.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=25.9.0"
+  },
+  "bin": {
+    "verona": "./bin/verona"
+  },
+  "files": ["dist/", "bin/", "deploy/", "src/hooks/memory-guard.sh", "LICENSE", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:runtime": "tsx scripts/build.ts",
+    "dev": "tsx src/cli/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "biome check .",
+    "format": "biome format --write .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.0",
+    "@slack/socket-mode": "^2.0.2",
+    "@slack/web-api": "^7.8.0",
+    "commander": "^12.1.0",
+    "croner": "^9.0.0",
+    "openai": "^4.77.0",
+    "simple-git": "^3.27.0",
+    "smol-toml": "^1.3.1",
+    "ulidx": "^2.4.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "@types/node": "^22.10.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

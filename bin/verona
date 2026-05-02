@@ -1,0 +1,6 @@
+#!/usr/bin/env node
+import("../dist/cli/index.js").catch((err) => {
+  console.error("verona: failed to start —", err?.message ?? err);
+  console.error('  did you run `npm run build`? (or `npm run dev` for development)');
+  process.exit(1);
+});
