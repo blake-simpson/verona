@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Verona daemon launchd template (macOS).
+
+  Replace these placeholders before installing:
+    {{VERONA_RUNTIME}}   absolute path to the verona-runtime/ tree (e.g. /opt/verona/runtime)
+    {{VERONA_STATE_DIR}} absolute path to your state dir (e.g. /Users/you/.verona/state)
+    {{NODE_BIN}}         absolute path to a Node 25.9+ binary (e.g. /Users/you/.local/share/mise/installs/node/25.9.0/bin/node)
+    {{USER}}             macOS username
+
+  Then:
+    cp this file to ~/Library/LaunchAgents/com.verona.daemon.plist
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.verona.daemon.plist
+    launchctl enable    gui/$(id -u)/com.verona.daemon
+    launchctl kickstart -k gui/$(id -u)/com.verona.daemon
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.verona.daemon</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>{{NODE_BIN}}</string>
+    <string>{{VERONA_RUNTIME}}/dist/cli/index.js</string>
+    <string>daemon</string>
+  </array>
+
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>VERONA_STATE_DIR</key>
+    <string>{{VERONA_STATE_DIR}}</string>
+    <key>HOME</key>
+    <string>/Users/{{USER}}</string>
+    <key>PATH</key>
+    <string>/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin</string>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+    <key>Crashed</key>
+    <true/>
+  </dict>
+
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+  <key>StandardOutPath</key>
+  <string>{{VERONA_STATE_DIR}}/logs/daemon.stdout.log</string>
+
+  <key>StandardErrorPath</key>
+  <string>{{VERONA_STATE_DIR}}/logs/daemon.stderr.log</string>
+
+  <key>WorkingDirectory</key>
+  <string>{{VERONA_RUNTIME}}</string>
+</dict>
+</plist>

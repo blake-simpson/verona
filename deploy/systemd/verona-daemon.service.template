@@ -1,0 +1,34 @@
+# Verona daemon systemd user-mode template (Linux).
+#
+# Install path: ~/.config/systemd/user/verona-daemon.service
+# Replace placeholders below, then:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now verona-daemon.service
+#   loginctl enable-linger $USER     # so it survives logout
+#   journalctl --user -u verona-daemon -f
+#
+# Placeholders:
+#   {{VERONA_RUNTIME}}   absolute path to the verona-runtime/ tree (e.g. /opt/verona/runtime)
+#   {{VERONA_STATE_DIR}} absolute path to your state dir
+#   {{NODE_BIN}}         absolute path to a Node 25.9+ binary
+
+[Unit]
+Description=Verona agent daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{VERONA_RUNTIME}}
+Environment=VERONA_STATE_DIR={{VERONA_STATE_DIR}}
+ExecStart={{NODE_BIN}} {{VERONA_RUNTIME}}/dist/cli/index.js daemon
+Restart=on-failure
+RestartSec=10s
+# We don't need elevated privileges; user-mode service is sufficient.
+NoNewPrivileges=true
+# Hardening (state dir is the only writable area; secrets dir already chmod 700).
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=default.target
