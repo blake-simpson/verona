@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.0
+
+**Released:** 2026-05-04
+
+### Changes since v0.1.3
+
+- feat: add `verona service restart` and `verona service logs`
+
 ## v0.1.3
 
 **Released:** 2026-05-04

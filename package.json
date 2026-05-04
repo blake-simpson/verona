@@ -1,6 +1,6 @@
 {
   "name": "verona-ai",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "description": "Self-hosted CLI framework for scheduled, self-learning AI agents with persistent memory and bidirectional comms.",
   "license": "MIT",
   "type": "module",
