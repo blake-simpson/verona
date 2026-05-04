@@ -77,6 +77,47 @@ export async function runServiceStatus(opts: ServiceOptions = {}): Promise<strin
   return runChecked("launchctl", ["print", `gui/${uid}/com.verona.daemon`], { allowFail: true });
 }
 
+export async function runServiceRestart(opts: ServiceOptions = {}): Promise<string> {
+  const ctx = await resolveServiceContext(opts);
+  if (ctx.platform === "linux") {
+    return runChecked("systemctl", ["--user", "restart", "verona-daemon.service"]);
+  }
+  const uid = userInfo().uid;
+  return runChecked("launchctl", ["kickstart", "-k", `gui/${uid}/com.verona.daemon`]);
+}
+
+export interface ServiceLogsOptions extends ServiceOptions {
+  /** Number of historical lines to print before following. */
+  lines?: number;
+  /** When false, dump and exit; when true (default), follow forever. */
+  follow?: boolean;
+}
+
+/**
+ * Stream daemon logs to the caller's terminal. On Linux this is journalctl;
+ * on macOS it tails the launchd-managed stdout/stderr files in `state/logs/`.
+ * Returns when the user hits Ctrl-C.
+ */
+export async function runServiceLogs(opts: ServiceLogsOptions = {}): Promise<void> {
+  const ctx = await resolveServiceContext(opts);
+  const lines = opts.lines ?? 100;
+  const follow = opts.follow ?? true;
+
+  if (ctx.platform === "linux") {
+    const args = ["--user", "-u", "verona-daemon", "-n", String(lines)];
+    if (follow) args.push("-f");
+    await runInherited("journalctl", args);
+    return;
+  }
+
+  const stdoutPath = path.join(ctx.stateDir, "logs", "daemon.stdout.log");
+  const stderrPath = path.join(ctx.stateDir, "logs", "daemon.stderr.log");
+  const args = ["-n", String(lines)];
+  if (follow) args.push("-F");
+  args.push(stdoutPath, stderrPath);
+  await runInherited("tail", args);
+}
+
 interface ServiceContext {
   platform: "linux" | "darwin";
   runtimeDir: string;
@@ -134,8 +175,9 @@ async function installLinux(ctx: ServiceContext, dryRun: boolean): Promise<Servi
       `Enable lingering so the daemon survives logout: \`sudo loginctl enable-linger ${ctx.user}\``,
     );
   }
-  hints.push("Tail logs: `journalctl --user -u verona-daemon -f`");
-  hints.push("Stop service: `systemctl --user stop verona-daemon`");
+  hints.push("Tail logs:     `verona service logs`");
+  hints.push("Restart:       `verona service restart`");
+  hints.push("Stop service:  `systemctl --user stop verona-daemon`");
 
   return {
     platform: "linux",
@@ -179,8 +221,9 @@ async function installDarwin(ctx: ServiceContext, dryRun: boolean): Promise<Serv
   }
 
   const hints = [
-    `Tail logs: \`tail -f ${ctx.stateDir}/logs/daemon.stdout.log\``,
-    "Stop service: `launchctl bootout gui/$(id -u)/com.verona.daemon`",
+    "Tail logs:     `verona service logs`",
+    "Restart:       `verona service restart`",
+    "Stop service:  `launchctl bootout gui/$(id -u)/com.verona.daemon`",
   ];
 
   return {
@@ -203,6 +246,27 @@ async function isLingerEnabled(user: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * Run a subprocess with stdio inherited, so its output streams directly to the
+ * caller's terminal. Used for `service logs` (tail/journalctl). Resolves on
+ * any close (including SIGINT) so Ctrl-C is a clean exit.
+ */
+function runInherited(cmd: string, args: string[]): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const proc = spawn(cmd, args, { stdio: "inherit" });
+    proc.on("error", (err) => {
+      reject(
+        new VeronaError(
+          "config",
+          `failed to spawn \`${cmd}\`: ${err.message}. Is it on PATH?`,
+          { cause: err },
+        ),
+      );
+    });
+    proc.on("close", () => resolve());
+  });
 }
 
 interface RunOptions {

@@ -18,6 +18,8 @@ import { runScheduleList, runScheduleNext, runScheduleRun } from "./commands/sch
 import {
   formatInstallResult,
   runServiceInstall,
+  runServiceLogs,
+  runServiceRestart,
   runServiceStatus,
   runServiceUninstall,
 } from "./commands/service.js";
@@ -314,6 +316,31 @@ export async function main(argv: string[] = process.argv): Promise<number> {
     .action(async () => {
       const out = await runServiceStatus({ stateDir: program.opts().stateDir });
       process.stdout.write(`${out}\n`);
+    });
+
+  service
+    .command("restart")
+    .description("restart the running daemon (systemctl restart / launchctl kickstart)")
+    .action(async () => {
+      const out = await runServiceRestart({ stateDir: program.opts().stateDir });
+      process.stdout.write(`${out}\n`);
+    });
+
+  service
+    .command("logs")
+    .description("stream daemon logs (journalctl on Linux, tail on macOS)")
+    .option("-n, --lines <count>", "number of historical lines to show before following", "100")
+    .option("--no-follow", "dump and exit instead of following")
+    .action(async (cmdOpts: { lines: string; follow: boolean }) => {
+      const lines = Number.parseInt(cmdOpts.lines, 10);
+      if (!Number.isFinite(lines) || lines < 0) {
+        throw new Error(`--lines must be a non-negative integer (got ${cmdOpts.lines})`);
+      }
+      await runServiceLogs({
+        stateDir: program.opts().stateDir,
+        lines,
+        follow: cmdOpts.follow,
+      });
     });
 
   await program.parseAsync(argv);
