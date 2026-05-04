@@ -47,6 +47,9 @@ export class GitRecorder {
     if (!exists) {
       await mkdir(this.stateDir, { recursive: true });
       await this.git.init();
+    }
+    await this.ensureCommitIdentity();
+    if (!exists) {
       await this.writeDefaultGitignore();
       await this.git.add([".gitignore"]);
       await this.commit({
@@ -54,6 +57,30 @@ export class GitRecorder {
         paths: [".gitignore"],
         skipIfClean: true,
       });
+    }
+  }
+
+  /**
+   * Make sure git has an author identity for commits. If the host's global
+   * config provides one, leave it alone (the user's name shows up in the
+   * audit trail). Otherwise set repo-local fallbacks so the daemon can commit
+   * on a fresh server / CI runner with no global git config.
+   */
+  private async ensureCommitIdentity(): Promise<void> {
+    if (!(await this.hasGitConfig("user.name"))) {
+      await this.git.addConfig("user.name", "Verona");
+    }
+    if (!(await this.hasGitConfig("user.email"))) {
+      await this.git.addConfig("user.email", "verona@local");
+    }
+  }
+
+  private async hasGitConfig(key: string): Promise<boolean> {
+    try {
+      const value = await this.git.raw(["config", "--get", key]);
+      return value.trim().length > 0;
+    } catch {
+      return false;
     }
   }
 
