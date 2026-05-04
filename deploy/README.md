@@ -1,12 +1,28 @@
 # Deploying Verona as a service
 
-Verona's daemon runs as a long-lived process. To survive reboots and run unattended, register it with your OS service manager. Two templates are provided.
+Verona's daemon runs as a long-lived process. To survive reboots and run unattended, register it with your OS service manager.
+
+## Recommended: `verona service install`
+
+```bash
+npm install -g verona-ai
+verona init
+verona service install     # detects platform, renders template, enables + starts the daemon
+```
+
+`verona service install` auto-detects the runtime path (where `verona-ai` was installed), the node binary (`process.execPath`), and the state dir (`$VERONA_STATE_DIR` or `~/.verona/state`). On Linux it writes `~/.config/systemd/user/verona-daemon.service` and runs `systemctl --user enable --now`. On macOS it writes `~/Library/LaunchAgents/com.verona.daemon.plist` and bootstraps it.
+
+- Render without enabling: `verona service install --dry-run`
+- Remove: `verona service uninstall`
+- Status: `verona service status`
+
+The rest of this document is the **manual** path — useful when you need to customize the unit file or deploy with infrastructure-as-code.
 
 ## Prerequisites (every host)
 
 1. **Node 25.9+** installed and on `PATH`. Verify: `node --version`. (Recommended: install via `mise` and check `.tool-versions` is respected on the host.)
 2. **The `claude` CLI installed and logged in.** Run `claude login` once. The default `claude-cli` adapter uses your subscription — Verona never sees the credentials.
-3. **The runtime artifact deployed.** Build with `verona build` on a dev host, then copy the `verona-runtime/` directory to the target host (e.g. via `rsync -av verona-runtime/ host:/opt/verona/runtime/`).
+3. **The runtime present on the host.** Either `npm install -g verona-ai` (then the runtime lives in your npm global `lib/node_modules/verona-ai/`) or build from source with `npm run build` and use the repo path as the runtime.
 4. **A state directory.** Pick a path (e.g. `~/.verona/state` on Mac, `/var/lib/verona/state` on a server). Run `VERONA_STATE_DIR=<path> verona init` once on the host. The state dir is **never overwritten** by deploys.
 
 ## macOS — launchd

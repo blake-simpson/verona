@@ -15,6 +15,12 @@ import { runInvocations } from "./commands/invocations.js";
 import { formatLogList, listLogs, readLatestLog } from "./commands/logs.js";
 import { runReload } from "./commands/reload.js";
 import { runScheduleList, runScheduleNext, runScheduleRun } from "./commands/schedule.js";
+import {
+  formatInstallResult,
+  runServiceInstall,
+  runServiceStatus,
+  runServiceUninstall,
+} from "./commands/service.js";
 
 export async function main(argv: string[] = process.argv): Promise<number> {
   const program = new Command();
@@ -274,6 +280,41 @@ export async function main(argv: string[] = process.argv): Promise<number> {
         }
       },
     );
+
+  const service = program
+    .command("service")
+    .description("register the daemon with the host service manager (systemd / launchd)");
+
+  service
+    .command("install")
+    .description("write the unit file and enable+start the daemon")
+    .option("--node-bin <path>", "absolute path to the node binary (default: process.execPath)")
+    .option("--dry-run", "render the unit file but skip loader commands", false)
+    .action(async (cmdOpts: { nodeBin?: string; dryRun: boolean }) => {
+      const result = await runServiceInstall({
+        stateDir: program.opts().stateDir,
+        ...(cmdOpts.nodeBin !== undefined && { nodeBin: cmdOpts.nodeBin }),
+        dryRun: cmdOpts.dryRun,
+      });
+      process.stdout.write(`${formatInstallResult(result)}\n`);
+    });
+
+  service
+    .command("uninstall")
+    .description("stop, disable, and remove the daemon unit file")
+    .action(async () => {
+      const result = await runServiceUninstall({ stateDir: program.opts().stateDir });
+      process.stdout.write(`uninstalled (${result.platform})\n  unit: ${result.unitPath}\n`);
+      for (const block of result.loaderOutput) process.stdout.write(`\n${block}\n`);
+    });
+
+  service
+    .command("status")
+    .description("show the service manager's view of the daemon")
+    .action(async () => {
+      const out = await runServiceStatus({ stateDir: program.opts().stateDir });
+      process.stdout.write(`${out}\n`);
+    });
 
   await program.parseAsync(argv);
   return typeof process.exitCode === "number" ? process.exitCode : 0;

@@ -1,6 +1,6 @@
 {
-  "name": "verona",
-  "version": "0.0.0",
+  "name": "verona-ai",
+  "version": "0.1.0",
   "description": "Self-hosted CLI framework for scheduled, self-learning AI agents with persistent memory and bidirectional comms.",
   "license": "MIT",
   "type": "module",
@@ -10,7 +10,26 @@
   "bin": {
     "verona": "./bin/verona"
   },
-  "files": ["dist/", "bin/", "deploy/", "src/hooks/memory-guard.sh", "LICENSE", "README.md"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/blake-simpson/verona.git"
+  },
+  "homepage": "https://github.com/blake-simpson/verona#readme",
+  "bugs": {
+    "url": "https://github.com/blake-simpson/verona/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist/",
+    "bin/",
+    "deploy/",
+    "agents/examples/",
+    "src/hooks/memory-guard.sh",
+    "LICENSE",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json && mkdir -p dist/hooks && cp src/hooks/memory-guard.sh dist/hooks/memory-guard.sh && chmod +x dist/hooks/memory-guard.sh",
     "build:runtime": "tsx scripts/build.ts",

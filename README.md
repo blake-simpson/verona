@@ -21,18 +21,29 @@ You probably don't want to write a bespoke daemon every time you want a "thing t
 ## Install
 
 ```bash
-git clone https://github.com/<you>/verona ~/code/verona
-cd ~/code/verona
-npm install
-npm run build
-./bin/verona init        # scaffold ~/.verona/state
-./bin/verona doctor      # verify the host (claude binary, perms, git)
+npm install -g verona-ai
+verona init                  # scaffold ~/.verona/state
+verona doctor                # verify the host (claude binary, perms, git)
+verona service install       # register with systemd (linux) or launchd (macOS)
 ```
+
+The last step writes the daemon unit file with auto-detected paths, then enables and starts it. On Linux you'll also want `sudo loginctl enable-linger $USER` so the daemon survives logout — the install command prints this hint if it isn't already enabled.
 
 You'll need:
 
-- **Node.js ≥ 25.9** (see `.tool-versions`; `mise install` will pick it up).
+- **Node.js ≥ 25.9** on `PATH` (see `.tool-versions`; `mise install` will pick it up).
 - **The `claude` CLI** installed and logged in (`claude login`) on every host where you'll use the default `claude-cli` adapter. Verona never sees your subscription credentials — it relies on `claude` being authenticated separately.
+
+### Hacking on Verona itself
+
+```bash
+git clone https://github.com/blake-simpson/verona ~/code/verona
+cd ~/code/verona
+npm install
+npm run build
+./bin/verona init
+./bin/verona doctor
+```
 
 ## Quick start
 
