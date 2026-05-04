@@ -3,7 +3,9 @@
  * to it.
  */
 
+import { readFileSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { runAgentsAdd, runAgentsInit, runAgentsList, runAgentsRemove } from "./commands/agents.js";
 import { runConnectorsAdd, runConnectorsTest } from "./commands/connectors.js";
@@ -24,11 +26,19 @@ import {
   runServiceUninstall,
 } from "./commands/service.js";
 
+function resolvePackageVersion(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  const pkgPath = path.resolve(here, "..", "..", "package.json");
+  const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version?: string };
+  return pkg.version ?? "0.0.0";
+}
+
 export async function main(argv: string[] = process.argv): Promise<number> {
   const program = new Command();
   program
     .name("verona")
     .description("Self-hosted CLI framework for scheduled, self-learning AI agents.")
+    .version(resolvePackageVersion(), "-v, --version", "print the verona-ai version and exit")
     .option("--state-dir <path>", "override the runtime state dir (default: ~/.verona/state)")
     .showHelpAfterError();
 
