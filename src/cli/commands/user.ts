@@ -74,6 +74,15 @@ export async function runUserInit(opts: UserInitOptions = {}): Promise<UserInitR
   if (!wasRepo) {
     await git.init();
     await ensureCommitIdentity(git);
+    // Force the initial branch to `main` regardless of git's
+    // `init.defaultBranch` setting. Sidesteps master/main mismatches when
+    // the GitHub remote defaults to main but the local git is older.
+    // `symbolic-ref` works before the first commit; non-fatal if it fails.
+    try {
+      await git.raw(["symbolic-ref", "HEAD", "refs/heads/main"]);
+    } catch {
+      /* leave whatever git's default produced */
+    }
   }
 
   const gitignorePath = path.join(userDir, ".gitignore");
@@ -147,7 +156,15 @@ export async function runUserPush(opts: UserPushOptions = {}): Promise<UserPushR
       `no \`origin\` remote configured for ${userDir}. Set one with \`git -C ${userDir} remote add origin <url>\` or rerun \`verona user init --remote <url>\`.`,
     );
   }
-  await git.push();
+  // Always pass --set-upstream so the first push works without depending on
+  // the host's `push.autoSetupRemote` config (default since git 2.37, but
+  // missing on older systems and CI runners). Idempotent: re-confirms the
+  // tracking ref on subsequent pushes.
+  const currentBranch = (await git.status()).current;
+  if (!currentBranch) {
+    throw new StateError(`could not determine current branch in ${userDir}`);
+  }
+  await git.push(["--set-upstream", "origin", currentBranch]);
   return { userDir, committed, pushed: true, commit };
 }
 
