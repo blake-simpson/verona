@@ -1,5 +1,14 @@
 # Changelog
 
+## v0.4.0
+
+**Released:** 2026-05-05
+
+### Changes since v0.3.0
+
+- feat: bi-directional connectors as agent tools (per-spawn MCP)
+- docs: add user-content-sync knowledge entry + deploy key recipe
+
 ## v0.3.0
 
 **Released:** 2026-05-05
