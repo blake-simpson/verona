@@ -18,6 +18,15 @@ webhook_listen_port = 0   # 0 disables inbound webhook listener
 [cost_tracker]
 rollup_interval_seconds = 300
 rotate_invocations_at_mb = 50
+
+# [user_sync] runs \`git pull --ff-only\` on ~/.verona/user/ at \`interval\`,
+# then signals reload if HEAD changed. Disabled by default — enable when
+# you author on a laptop and run on a server.
+#
+# [user_sync]
+# enabled = true
+# interval = "*/5 * * * *"
+# reload_on_change = true
 `;
 
 export interface InitOptions {

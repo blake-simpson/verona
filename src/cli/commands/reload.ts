@@ -1,13 +1,15 @@
 /**
  * `verona reload` — sends SIGHUP to the running daemon, asking it to
- * re-read agent configs and re-apply the schedule.
+ * re-read agent configs, re-apply the schedule, and diff the user connector
+ * registry (start/stop/restart based on manifest version).
  *
  * Reads the pidfile at <state>/daemon.pid (written by `verona daemon` at
  * startup, removed at shutdown). Verifies the process exists with `kill -0`
  * before signaling.
  *
- * Note: connector wiring (Slack tokens, channel→agent map) is NOT reloaded;
- * those changes still need a full daemon restart.
+ * Built-in connectors (slack) are NOT reloaded — Slack tokens and the
+ * channel→agent map are bound at startup; those changes still need a full
+ * daemon restart.
  */
 
 import { readFile } from "node:fs/promises";

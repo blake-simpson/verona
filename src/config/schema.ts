@@ -121,6 +121,50 @@ export const VeronaConfigSchema = z.object({
       rotate_invocations_at_mb: z.number().positive().default(50),
     })
     .default({ rollup_interval_seconds: 300, rotate_invocations_at_mb: 50 }),
+  /**
+   * Periodic git-pull of the user content repo (~/.verona/user/). When
+   * `enabled = true`, the daemon runs `git pull --ff-only` on the configured
+   * interval and fires SIGHUP-equivalent reload if HEAD changed.
+   */
+  user_sync: z
+    .object({
+      enabled: z.boolean().default(false),
+      /** Cron expression interpreted by croner. Default: every 5 minutes. */
+      interval: z.string().default("*/5 * * * *"),
+      reload_on_change: z.boolean().default(true),
+    })
+    .default({ enabled: false, interval: "*/5 * * * *", reload_on_change: true }),
 });
 
 export type VeronaConfig = z.infer<typeof VeronaConfigSchema>;
+
+// -----------------------------------------------------------------------------
+// connector.toml (manifest for user-authored connectors)
+// -----------------------------------------------------------------------------
+
+const ConnectorIdSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z][a-z0-9-]*$/, "must be kebab-case starting with a letter");
+
+const SemverSchema = z
+  .string()
+  .regex(/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/, "must be a semver like 1.2.3 or 1.2.3-beta.1");
+
+export const ConnectorManifestSchema = z.object({
+  id: ConnectorIdSchema,
+  direction: z.enum(["inbound", "outbound", "both"]),
+  version: SemverSchema,
+  /** Module path relative to the connector dir. Default `dist/index.js`. */
+  entry: z.string().min(1).default("dist/index.js"),
+  description: z.string().optional(),
+  /**
+   * Secret keys this connector requires. `verona connectors add <id>` prompts
+   * for each and writes them to <state>/secrets/_connectors/<id>/<key>. Empty
+   * array means the connector needs no secrets.
+   */
+  secrets: z.array(z.string().regex(/^[A-Za-z][A-Za-z0-9_-]*$/)).default([]),
+});
+
+export type ConnectorManifest = z.infer<typeof ConnectorManifestSchema>;

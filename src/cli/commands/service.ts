@@ -10,12 +10,12 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
-import { delimiter } from "node:path";
 import { homedir, platform, userInfo } from "node:os";
+import { delimiter } from "node:path";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ConfigError, VeronaError } from "../../util/errors.js";
 import { resolveStateDir } from "../../state/paths.js";
+import { ConfigError, VeronaError } from "../../util/errors.js";
 
 export interface ServiceOptions {
   stateDir?: string;
@@ -62,7 +62,9 @@ export async function runServiceUninstall(opts: ServiceOptions = {}): Promise<{
   if (ctx.platform === "linux") {
     const unitPath = path.join(homedir(), ".config", "systemd", "user", "verona-daemon.service");
     const out: string[] = [];
-    out.push(await runChecked("systemctl", ["--user", "disable", "--now", "verona-daemon.service"]));
+    out.push(
+      await runChecked("systemctl", ["--user", "disable", "--now", "verona-daemon.service"]),
+    );
     await safeUnlink(unitPath);
     out.push(await runChecked("systemctl", ["--user", "daemon-reload"]));
     return { platform: "linux", unitPath, loaderOutput: out };
@@ -71,7 +73,9 @@ export async function runServiceUninstall(opts: ServiceOptions = {}): Promise<{
   const unitPath = path.join(homedir(), "Library", "LaunchAgents", "com.verona.daemon.plist");
   const out: string[] = [];
   const uid = userInfo().uid;
-  out.push(await runChecked("launchctl", ["bootout", `gui/${uid}/com.verona.daemon`], { allowFail: true }));
+  out.push(
+    await runChecked("launchctl", ["bootout", `gui/${uid}/com.verona.daemon`], { allowFail: true }),
+  );
   await safeUnlink(unitPath);
   return { platform: "darwin", unitPath, loaderOutput: out };
 }
@@ -298,11 +302,9 @@ function runInherited(cmd: string, args: string[]): Promise<void> {
     const proc = spawn(cmd, args, { stdio: "inherit" });
     proc.on("error", (err) => {
       reject(
-        new VeronaError(
-          "config",
-          `failed to spawn \`${cmd}\`: ${err.message}. Is it on PATH?`,
-          { cause: err },
-        ),
+        new VeronaError("config", `failed to spawn \`${cmd}\`: ${err.message}. Is it on PATH?`, {
+          cause: err,
+        }),
       );
     });
     proc.on("close", () => resolve());
@@ -330,16 +332,17 @@ function runChecked(cmd: string, args: string[], opts: RunOptions = {}): Promise
         return;
       }
       reject(
-        new VeronaError(
-          "config",
-          `failed to spawn \`${cmd}\`: ${err.message}. Is it on PATH?`,
-          { cause: err },
-        ),
+        new VeronaError("config", `failed to spawn \`${cmd}\`: ${err.message}. Is it on PATH?`, {
+          cause: err,
+        }),
       );
     });
     proc.on("close", (code) => {
       const summary = `$ ${cmd} ${args.join(" ")}`;
-      const tail = [stdout, stderr].filter((s) => s.trim()).join("\n").trim();
+      const tail = [stdout, stderr]
+        .filter((s) => s.trim())
+        .join("\n")
+        .trim();
       const block = tail ? `${summary}\n${tail}` : summary;
       if (code === 0 || opts.allowFail) {
         resolve(block);

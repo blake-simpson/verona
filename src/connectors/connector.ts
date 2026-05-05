@@ -93,3 +93,31 @@ export interface Connector {
    */
   send?(msg: OutboundMessage): Promise<void>;
 }
+
+/**
+ * Init payload passed to a user-authored connector's factory. Built by the
+ * daemon from the connector's manifest + state/secrets + agent subscriptions.
+ *
+ * @see src/core/connector-loader.ts
+ */
+export interface UserConnectorInit {
+  /**
+   * Resolved values from <state>/secrets/_connectors/<id>/<key>, one entry
+   * per key listed in connector.toml's `secrets` array. Trimmed.
+   */
+  readonly secrets: Readonly<Record<string, string>>;
+  /**
+   * Agents that declared `[connectors.<this-id>]` in their agent.toml.
+   * Map of agent_name → the raw config block. Mirrors SlackConnector's
+   * channelToAgent pattern but generic. Empty for connectors no agent
+   * subscribed to (still useful for outbound-only connectors).
+   */
+  readonly agentSubscriptions: ReadonlyMap<string, Readonly<Record<string, unknown>>>;
+}
+
+/**
+ * Default-export shape every user-authored connector module must satisfy.
+ * Either return a ready Connector synchronously, return a Promise, or throw
+ * if the init payload fails the connector's own validation.
+ */
+export type UserConnectorFactory = (init: UserConnectorInit) => Connector | Promise<Connector>;

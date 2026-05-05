@@ -52,8 +52,10 @@ describe("verona doctor", () => {
   it("reports state-dir + git checks as ok after init (skip claude probe)", async () => {
     await runInit({ stateDir });
     const checks = await runDoctor({ stateDir, checkClaude: false });
-    const failed = checks.filter((c) => !c.ok);
-    expect(failed.map((c) => `${c.name}: ${c.detail}`).join("\n")).toBe("");
+    // Warnings (plugin presence, legacy agents dir) are environmental;
+    // they don't fail the run. Only error-severity checks count.
+    const errored = checks.filter((c) => !c.ok && c.severity !== "warn");
+    expect(errored.map((c) => `${c.name}: ${c.detail}`).join("\n")).toBe("");
   });
 
   it("reports a missing state dir as failed", async () => {
@@ -62,5 +64,16 @@ describe("verona doctor", () => {
       checkClaude: false,
     });
     expect(checks.some((c) => c.name === "state dir exists" && !c.ok)).toBe(true);
+  });
+
+  it("reports the plugin check as a warning when not installed", async () => {
+    await runInit({ stateDir });
+    const checks = await runDoctor({ stateDir, checkClaude: false });
+    const plugin = checks.find((c) => c.name === "claude code plugin");
+    expect(plugin).toBeDefined();
+    if (plugin && !plugin.ok) {
+      expect(plugin.severity).toBe("warn");
+      expect(plugin.detail).toMatch(/plugin marketplace add/);
+    }
   });
 });

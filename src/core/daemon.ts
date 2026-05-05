@@ -15,18 +15,30 @@ import { AnthropicApiAdapter } from "../adapters/anthropic-api.js";
 import { ClaudeCliAdapter } from "../adapters/claude-cli.js";
 import { OpenAICompatAdapter } from "../adapters/openai-compat.js";
 import { loadAgentConfig, loadVeronaConfig } from "../config/loader.js";
-import type { AgentConfig, VeronaConfig } from "../config/schema.js";
+import type { AgentConfig, ConnectorManifest, VeronaConfig } from "../config/schema.js";
 import type { Connector, ConnectorContext, InboundEvent } from "../connectors/connector.js";
 import { SlackConnector } from "../connectors/slack/index.js";
 import { memoryGuardScriptPath } from "../hooks/locate.js";
 import { getSecret } from "../secrets/store.js";
 import { listRegisteredAgents } from "../state/agent-registry.js";
-import { agentDir as resolveAgentDir, statePaths } from "../state/paths.js";
+import { agentDir as resolveAgentDir, resolveConnectorsDir, statePaths } from "../state/paths.js";
 import { ConfigError } from "../util/errors.js";
 import { AuditLog } from "./audit-log.js";
+import {
+  type UserConnectorRecord,
+  buildAgentSubscriptions,
+  discoverUserConnectors,
+  instantiateUserConnector,
+} from "./connector-loader.js";
 import { type DispatchTrigger, dispatch } from "./dispatcher.js";
 import { type AgentSchedule, Scheduler } from "./scheduler.js";
 import { SessionStore } from "./session-store.js";
+import { UserSync } from "./user-sync.js";
+
+interface ConnectorMeta {
+  isUserConnector: boolean;
+  manifest?: ConnectorManifest;
+}
 
 export interface DaemonInit {
   stateDir: string;
@@ -42,7 +54,10 @@ export class Daemon {
   private auditLog: AuditLog;
   private sessionStore: SessionStore;
   private connectors: Map<string, Connector> = new Map();
+  private connectorMeta: Map<string, ConnectorMeta> = new Map();
+  private connectorCtx?: ConnectorContext;
   private agents: AgentSchedule[] = [];
+  private userSync?: UserSync;
   /**
    * Set in `writePidFile()` so `removePidFile()` only unlinks the file it
    * wrote. Without this, the ephemeral Daemon instances built by
@@ -92,10 +107,14 @@ export class Daemon {
   }
 
   /**
-   * Re-read every registered agent's config and re-apply the schedule.
-   * Triggered by SIGHUP or programmatically. Does NOT restart connectors —
-   * Slack token / channel-mapping changes still require a full daemon
-   * restart (Socket Mode WebSocket is bound at startup).
+   * Re-read every registered agent's config, re-apply the schedule, and diff
+   * the user-connector registry: start/stop/restart user connectors based on
+   * their manifest version. Triggered by SIGHUP, by `daemon.reload()`, and by
+   * UserSync after a remote pull.
+   *
+   * Built-in connectors (slack) are NOT restarted — Socket Mode WebSocket is
+   * bound at startup; token / channel-mapping changes still require a full
+   * daemon restart.
    */
   async reload(): Promise<void> {
     if (!this.scheduler) {
@@ -104,11 +123,78 @@ export class Daemon {
     process.stdout.write("verona daemon: reload requested; re-reading agents…\n");
     this.agents = await this.loadAgents();
     this.scheduler.setAgents(this.agents);
-    // New jobs created by setAgents respect this.started — already true here —
-    // so they're created unpaused and start firing on the next cron tick.
+    await this.reloadUserConnectors();
     process.stdout.write(
-      `verona daemon: reloaded; ${this.scheduler.list().length} scheduled jobs\n`,
+      `verona daemon: reloaded; ${this.scheduler.list().length} scheduled jobs, ${this.connectors.size} connectors\n`,
     );
+  }
+
+  private async reloadUserConnectors(): Promise<void> {
+    let records: UserConnectorRecord[];
+    try {
+      records = await discoverUserConnectors(resolveConnectorsDir());
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`reload: user connector discovery failed — ${msg}\n`);
+      return;
+    }
+
+    const paths = statePaths(this.stateDir);
+    const subs = buildAgentSubscriptions(this.agents);
+    const seen = new Set<string>();
+
+    for (const rec of records) {
+      seen.add(rec.manifest.id);
+      const existing = this.connectorMeta.get(rec.manifest.id);
+      if (existing && !existing.isUserConnector) {
+        // built-in name clash — already warned at startup; ignore
+        continue;
+      }
+      if (existing?.manifest && existing.manifest.version === rec.manifest.version) {
+        continue; // unchanged
+      }
+      if (existing) {
+        const old = this.connectors.get(rec.manifest.id);
+        if (old?.stop) {
+          try {
+            await old.stop();
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            process.stderr.write(`reload: stopping old "${rec.manifest.id}" failed — ${msg}\n`);
+          }
+        }
+        this.connectors.delete(rec.manifest.id);
+        this.connectorMeta.delete(rec.manifest.id);
+      }
+      const connector = await instantiateUserConnector(rec, {
+        secretsRoot: paths.secrets,
+        agentSubscriptions: subs,
+      });
+      if (!connector) continue;
+      this.connectors.set(rec.manifest.id, connector);
+      this.connectorMeta.set(rec.manifest.id, {
+        isUserConnector: true,
+        manifest: rec.manifest,
+      });
+      if (connector.start) await connector.start(this.getConnectorCtx());
+    }
+
+    // Stop user connectors that disappeared from the user dir
+    for (const [id, meta] of [...this.connectorMeta.entries()]) {
+      if (!meta.isUserConnector) continue;
+      if (seen.has(id)) continue;
+      const c = this.connectors.get(id);
+      if (c?.stop) {
+        try {
+          await c.stop();
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          process.stderr.write(`reload: stopping removed "${id}" failed — ${msg}\n`);
+        }
+      }
+      this.connectors.delete(id);
+      this.connectorMeta.delete(id);
+    }
   }
 
   private onShutdown: (() => void) | undefined = undefined;
@@ -173,9 +259,58 @@ export class Daemon {
     this.scheduler.setAgents(this.agents);
 
     await this.bootstrapConnectors();
+
+    if (this.veronaConfig.user_sync.enabled) {
+      this.userSync = new UserSync({
+        enabled: this.veronaConfig.user_sync.enabled,
+        interval: this.veronaConfig.user_sync.interval,
+        reloadOnChange: this.veronaConfig.user_sync.reload_on_change,
+        stateDir: this.stateDir,
+        onChange: () => this.reload(),
+      });
+    }
   }
 
   private async bootstrapConnectors(): Promise<void> {
+    await this.startBuiltInConnectors();
+    await this.startUserConnectors();
+  }
+
+  private getConnectorCtx(): ConnectorContext {
+    if (this.connectorCtx) return this.connectorCtx;
+    this.connectorCtx = {
+      deliver: (event) => this.handleInbound(event),
+      audit: (record) => {
+        const base = {
+          ts: new Date().toISOString(),
+          runId: record.runId ?? ulid(),
+          type: record.type,
+          connector: record.connectorId,
+          messageBytes: record.messageBytes,
+          ok: record.ok,
+          ...(record.agent !== undefined && { agent: record.agent }),
+          ...(record.threadKey !== undefined && { threadKey: record.threadKey }),
+          ...(record.errorClass !== undefined && { errorClass: record.errorClass }),
+        };
+        if (record.type === "connector_send") {
+          void this.auditLog.append({
+            ...base,
+            type: "connector_send",
+            destination: record.destination ?? "",
+          });
+        } else {
+          void this.auditLog.append({
+            ...base,
+            type: "connector_receive",
+            ...(record.fromUser !== undefined && { fromUser: record.fromUser }),
+          });
+        }
+      },
+    };
+    return this.connectorCtx;
+  }
+
+  private async startBuiltInConnectors(): Promise<void> {
     // Slack: any agent that declares `[connectors] slack = { channel = "..." }`.
     const slackChannelToAgent = new Map<string, string>();
     for (const a of this.agents) {
@@ -208,37 +343,42 @@ export class Daemon {
       channelToAgent: slackChannelToAgent,
     });
     this.connectors.set("slack", slack);
-    const ctx: ConnectorContext = {
-      deliver: (event) => this.handleInbound(event),
-      audit: (record) => {
-        // Normalize connector audit shape into AuditRecord.
-        const base = {
-          ts: new Date().toISOString(),
-          runId: record.runId ?? ulid(),
-          type: record.type,
-          connector: record.connectorId,
-          messageBytes: record.messageBytes,
-          ok: record.ok,
-          ...(record.agent !== undefined && { agent: record.agent }),
-          ...(record.threadKey !== undefined && { threadKey: record.threadKey }),
-          ...(record.errorClass !== undefined && { errorClass: record.errorClass }),
-        };
-        if (record.type === "connector_send") {
-          void this.auditLog.append({
-            ...base,
-            type: "connector_send",
-            destination: record.destination ?? "",
-          });
-        } else {
-          void this.auditLog.append({
-            ...base,
-            type: "connector_receive",
-            ...(record.fromUser !== undefined && { fromUser: record.fromUser }),
-          });
-        }
-      },
-    };
-    if (slack.start) await slack.start(ctx);
+    this.connectorMeta.set("slack", { isUserConnector: false });
+    if (slack.start) await slack.start(this.getConnectorCtx());
+  }
+
+  private async startUserConnectors(): Promise<void> {
+    let records: UserConnectorRecord[];
+    try {
+      records = await discoverUserConnectors(resolveConnectorsDir());
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`warning: user connector discovery failed — ${msg}\n`);
+      return;
+    }
+    if (records.length === 0) return;
+
+    const paths = statePaths(this.stateDir);
+    const subs = buildAgentSubscriptions(this.agents);
+    for (const rec of records) {
+      if (this.connectors.has(rec.manifest.id)) {
+        process.stderr.write(
+          `warning: user connector "${rec.manifest.id}" conflicts with a built-in; skipping the user version.\n`,
+        );
+        continue;
+      }
+      const connector = await instantiateUserConnector(rec, {
+        secretsRoot: paths.secrets,
+        agentSubscriptions: subs,
+      });
+      if (!connector) continue;
+      this.connectors.set(rec.manifest.id, connector);
+      this.connectorMeta.set(rec.manifest.id, {
+        isUserConnector: true,
+        manifest: rec.manifest,
+      });
+      if (connector.start) await connector.start(this.getConnectorCtx());
+    }
   }
 
   /**
@@ -338,10 +478,12 @@ export class Daemon {
       throw new ConfigError("daemon.start() called before bootstrap()");
     }
     this.scheduler.start();
+    this.userSync?.start();
   }
 
   async stop(): Promise<void> {
     await this.scheduler?.stop();
+    this.userSync?.stop();
     for (const c of this.connectors.values()) {
       if (c.stop) await c.stop();
     }
@@ -369,6 +511,16 @@ export class Daemon {
   scheduler_(): Scheduler {
     if (!this.scheduler) throw new ConfigError("daemon not bootstrapped");
     return this.scheduler;
+  }
+
+  /** Tests + diagnostics. */
+  connectorIds(): string[] {
+    return [...this.connectors.keys()];
+  }
+
+  /** Tests + diagnostics. */
+  getConnector(id: string): Connector | undefined {
+    return this.connectors.get(id);
   }
 
   /**

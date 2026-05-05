@@ -8,7 +8,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { runAgentsAdd, runAgentsInit, runAgentsList, runAgentsRemove } from "./commands/agents.js";
-import { runConnectorsAdd, runConnectorsTest } from "./commands/connectors.js";
+import { runConnectorsAdd, runConnectorsBuild, runConnectorsTest } from "./commands/connectors.js";
 import { runCosts } from "./commands/costs.js";
 import { runDaemonCmd } from "./commands/daemon.js";
 import { formatDoctorReport, runDoctor } from "./commands/doctor.js";
@@ -25,6 +25,13 @@ import {
   runServiceStatus,
   runServiceUninstall,
 } from "./commands/service.js";
+import {
+  describeUserStatus,
+  runUserInit,
+  runUserPull,
+  runUserPush,
+  runUserStatus,
+} from "./commands/user.js";
 
 function resolvePackageVersion(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
@@ -60,8 +67,8 @@ export async function main(argv: string[] = process.argv): Promise<number> {
         checkClaude: cmdOpts.checkClaude,
       });
       process.stdout.write(`${formatDoctorReport(checks)}\n`);
-      const ok = checks.every((c) => c.ok);
-      process.exitCode = ok ? 0 : 1;
+      const errored = checks.some((c) => !c.ok && c.severity !== "warn");
+      process.exitCode = errored ? 1 : 0;
     });
 
   const agents = program
@@ -152,7 +159,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
   program
     .command("reload")
     .description(
-      "signal a running daemon to re-read agent configs (SIGHUP). connectors / Slack tokens still require a full restart.",
+      "signal a running daemon (SIGHUP) to re-read agent configs and diff the user-connector registry. Built-in connector tokens (slack) still require a full restart.",
     )
     .action(async () => {
       const result = await runReload({ stateDir: program.opts().stateDir });
@@ -196,12 +203,18 @@ export async function main(argv: string[] = process.argv): Promise<number> {
 
   connectors
     .command("add <id>")
-    .description("interactively capture connector tokens (currently: slack)")
+    .description(
+      "interactively capture connector tokens (built-ins: slack; user connectors read keys from connector.toml's `secrets`)",
+    )
     .action(async (connectorId: string) => {
       const written = await runConnectorsAdd({
         connectorId,
         stateDir: program.opts().stateDir,
       });
+      if (written.length === 0) {
+        process.stdout.write(`no secrets configured for "${connectorId}".\n`);
+        return;
+      }
       process.stdout.write(`tokens saved (chmod 0600):\n  ${written.join("\n  ")}\n`);
     });
 
@@ -218,6 +231,18 @@ export async function main(argv: string[] = process.argv): Promise<number> {
         ...(cmdOpts.text !== undefined && { text: cmdOpts.text }),
       });
       process.stdout.write(`${out}\n`);
+    });
+
+  connectors
+    .command("build <id>")
+    .description(
+      "esbuild a user connector's src/index.ts into the manifest's `entry` (default dist/index.js)",
+    )
+    .action(async (connectorId: string) => {
+      const result = await runConnectorsBuild({ connectorId });
+      process.stdout.write(
+        `built ${connectorId}\n  source: ${result.source}\n  output: ${result.output} (${result.bytes} bytes)\n`,
+      );
     });
 
   program
@@ -292,6 +317,68 @@ export async function main(argv: string[] = process.argv): Promise<number> {
         }
       },
     );
+
+  const user = program
+    .command("user")
+    .description("manage the user content git repo (~/.verona/user/) — agents + connectors");
+
+  user
+    .command("init")
+    .description("initialize ~/.verona/user/ as a git repo with agents/ and connectors/ subdirs")
+    .option("--remote <url>", "git remote URL (added as `origin`)")
+    .action(async (cmdOpts: { remote?: string }) => {
+      const result = await runUserInit({
+        ...(cmdOpts.remote !== undefined && { remote: cmdOpts.remote }),
+      });
+      const line = result.initialized
+        ? `initialized git repo at ${result.userDir}`
+        : `user dir already a git repo: ${result.userDir}`;
+      process.stdout.write(`${line}\n`);
+      if (result.remote) process.stdout.write(`origin: ${result.remote}\n`);
+    });
+
+  user
+    .command("push")
+    .description("commit any pending changes and push to origin")
+    .option("-m, --message <text>", "commit message (default: timestamped)")
+    .action(async (cmdOpts: { message?: string }) => {
+      const result = await runUserPush({
+        ...(cmdOpts.message !== undefined && { message: cmdOpts.message }),
+      });
+      if (result.committed && result.commit) {
+        process.stdout.write(`committed ${result.commit.slice(0, 8)}\n`);
+      } else if (!result.committed) {
+        process.stdout.write("nothing to commit\n");
+      }
+      if (result.pushed) process.stdout.write(`pushed ${result.userDir} → origin\n`);
+    });
+
+  user
+    .command("pull")
+    .description("git pull --ff-only; signals `verona reload` if HEAD changed")
+    .option("--no-reload", "skip the daemon reload even if HEAD moved")
+    .action(async (cmdOpts: { reload: boolean }) => {
+      const result = await runUserPull({
+        stateDir: program.opts().stateDir,
+        ...(cmdOpts.reload === false && { noReload: true }),
+      });
+      if (!result.changed) {
+        process.stdout.write(`already up to date (${result.after?.slice(0, 8) ?? "no head"})\n`);
+        return;
+      }
+      const tail = result.reloaded ? " (daemon reloaded)\n" : " (daemon NOT reloaded)\n";
+      process.stdout.write(
+        `pulled: ${result.before?.slice(0, 8) ?? "none"} → ${result.after?.slice(0, 8) ?? "none"}${tail}`,
+      );
+    });
+
+  user
+    .command("status")
+    .description("terse summary of the user repo's state")
+    .action(async () => {
+      const result = await runUserStatus();
+      process.stdout.write(`${describeUserStatus(result)}\n`);
+    });
 
   const service = program
     .command("service")
