@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.3
+
+**Released:** 2026-05-05
+
+### Changes since v0.2.2
+
+- feat: auto-post task response to slack via post_response per-task flag
+
 ## v0.2.2
 
 **Released:** 2026-05-05
