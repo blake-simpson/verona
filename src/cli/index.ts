@@ -301,11 +301,16 @@ export async function main(argv: string[] = process.argv): Promise<number> {
     .command("install")
     .description("write the unit file and enable+start the daemon")
     .option("--node-bin <path>", "absolute path to the node binary (default: process.execPath)")
+    .option(
+      "--claude-bin <path>",
+      "absolute path to the `claude` CLI (default: $VERONA_CLAUDE_BIN, then PATH lookup)",
+    )
     .option("--dry-run", "render the unit file but skip loader commands", false)
-    .action(async (cmdOpts: { nodeBin?: string; dryRun: boolean }) => {
+    .action(async (cmdOpts: { nodeBin?: string; claudeBin?: string; dryRun: boolean }) => {
       const result = await runServiceInstall({
         stateDir: program.opts().stateDir,
         ...(cmdOpts.nodeBin !== undefined && { nodeBin: cmdOpts.nodeBin }),
+        ...(cmdOpts.claudeBin !== undefined && { claudeBin: cmdOpts.claudeBin }),
         dryRun: cmdOpts.dryRun,
       });
       process.stdout.write(`${formatInstallResult(result)}\n`);

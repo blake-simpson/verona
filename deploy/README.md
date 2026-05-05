@@ -32,6 +32,7 @@ The rest of this document is the **manual** path — useful when you need to cus
 sed -e "s|{{VERONA_RUNTIME}}|/opt/verona/runtime|g" \
     -e "s|{{VERONA_STATE_DIR}}|$HOME/.verona/state|g" \
     -e "s|{{NODE_BIN}}|$(which node)|g" \
+    -e "s|{{CLAUDE_BIN}}|$(which claude)|g" \
     -e "s|{{USER}}|$(id -un)|g" \
     /opt/verona/runtime/deploy/launchd/com.verona.daemon.plist.template \
     > ~/Library/LaunchAgents/com.verona.daemon.plist
@@ -60,6 +61,7 @@ mkdir -p ~/.config/systemd/user
 sed -e "s|{{VERONA_RUNTIME}}|/opt/verona/runtime|g" \
     -e "s|{{VERONA_STATE_DIR}}|$HOME/.verona/state|g" \
     -e "s|{{NODE_BIN}}|$(which node)|g" \
+    -e "s|{{CLAUDE_BIN}}|$(which claude)|g" \
     /opt/verona/runtime/deploy/systemd/verona-daemon.service.template \
     > ~/.config/systemd/user/verona-daemon.service
 
@@ -91,6 +93,44 @@ verona schedule list                  # what jobs are scheduled
 verona schedule next                  # what fires next, when
 verona logs <agent> --latest          # most recent run log for an agent
 ```
+
+## Troubleshooting
+
+### `[claude-cli] failed to spawn claude`
+
+systemd `--user` and launchd both start services with a sanitised `PATH` that
+usually doesn't include `~/.local/bin`, fnm/nvm/mise version dirs, or wherever
+your interactive shell happens to find `claude`. The unit pins
+`VERONA_CLAUDE_BIN` to an absolute path to avoid this. If you see
+`failed to spawn claude` in the logs after upgrading from an older install,
+either re-run `verona service install` (it will re-render the unit with the
+detected path) or add the env var manually:
+
+```ini
+# ~/.config/systemd/user/verona-daemon.service.d/override.conf
+[Service]
+Environment=VERONA_CLAUDE_BIN=/absolute/path/to/claude
+```
+
+Then `systemctl --user daemon-reload && systemctl --user restart verona-daemon`.
+
+### `status=218/CAPABILITIES` restart loop on Linux
+
+Some VPS providers run user systemd inside LXC/OpenVZ-style containers that
+forbid namespace + capability operations. Hardening directives that need those
+operations will fail with `Operation not permitted` and the daemon will loop on
+restart. The shipped template avoids them — but if you've layered a drop-in
+with extra hardening (or inherited one from a configuration-management tool),
+remove or comment out:
+
+```
+ProtectHostname=    CapabilityBoundingSet=    AmbientCapabilities=
+ProtectHome=        ProtectProc=              ProtectSystem=strict
+BindReadOnlyPaths=  PrivateUsers=             RestrictNamespaces=
+```
+
+The shipped `NoNewPrivileges=true`, `PrivateTmp=true`, `ProtectSystem=full`
+combination works in every container we've tested.
 
 ## Why not Docker (yet)?
 

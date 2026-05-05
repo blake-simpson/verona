@@ -11,6 +11,10 @@
 #   {{VERONA_RUNTIME}}   absolute path to the verona-runtime/ tree (e.g. /opt/verona/runtime)
 #   {{VERONA_STATE_DIR}} absolute path to your state dir
 #   {{NODE_BIN}}         absolute path to a Node 25.9+ binary
+#   {{CLAUDE_BIN}}       absolute path to the `claude` CLI (e.g. ~/.local/bin/claude).
+#                        systemd --user starts services with a sanitised PATH that
+#                        rarely includes ~/.local/bin or fnm/nvm/volta version dirs,
+#                        so we pin the binary explicitly via VERONA_CLAUDE_BIN.
 
 [Unit]
 Description=Verona agent daemon
@@ -21,12 +25,19 @@ Wants=network-online.target
 Type=simple
 WorkingDirectory={{VERONA_RUNTIME}}
 Environment=VERONA_STATE_DIR={{VERONA_STATE_DIR}}
+Environment=VERONA_CLAUDE_BIN={{CLAUDE_BIN}}
 ExecStart={{NODE_BIN}} {{VERONA_RUNTIME}}/dist/cli/index.js daemon
 Restart=on-failure
 RestartSec=10s
-# We don't need elevated privileges; user-mode service is sufficient.
+
+# Hardening — kept minimal so the unit works inside LXC/OpenVZ-style containers
+# (common with cheap VPS providers). DON'T add the directives below without
+# testing on the target host — they require namespace + capability operations
+# the container manager may forbid, causing status=218/CAPABILITIES restart loops:
+#   ProtectHostname=, CapabilityBoundingSet=, AmbientCapabilities=,
+#   ProtectHome=, ProtectProc=, ProtectSystem=strict, BindReadOnlyPaths=,
+#   PrivateUsers=, RestrictNamespaces=
 NoNewPrivileges=true
-# Hardening (state dir is the only writable area; secrets dir already chmod 700).
 PrivateTmp=true
 ProtectSystem=full
 

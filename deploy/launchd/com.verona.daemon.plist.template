@@ -7,6 +7,8 @@
     {{VERONA_RUNTIME}}   absolute path to the verona-runtime/ tree (e.g. /opt/verona/runtime)
     {{VERONA_STATE_DIR}} absolute path to your state dir (e.g. /Users/you/.verona/state)
     {{NODE_BIN}}         absolute path to a Node 25.9+ binary (e.g. /Users/you/.local/share/mise/installs/node/25.9.0/bin/node)
+    {{CLAUDE_BIN}}       absolute path to the `claude` CLI (e.g. /Users/you/.local/bin/claude).
+                         Pinned because launchd's PATH rarely matches your login shell.
     {{USER}}             macOS username
 
   Then:
@@ -31,6 +33,8 @@
   <dict>
     <key>VERONA_STATE_DIR</key>
     <string>{{VERONA_STATE_DIR}}</string>
+    <key>VERONA_CLAUDE_BIN</key>
+    <string>{{CLAUDE_BIN}}</string>
     <key>HOME</key>
     <string>/Users/{{USER}}</string>
     <key>PATH</key>

@@ -8,7 +8,9 @@
  */
 
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { delimiter } from "node:path";
 import { homedir, platform, userInfo } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,6 +21,13 @@ export interface ServiceOptions {
   stateDir?: string;
   /** Override the auto-detected node binary (default: `process.execPath`). */
   nodeBin?: string;
+  /**
+   * Override the auto-detected `claude` CLI path. Defaults to
+   * `$VERONA_CLAUDE_BIN`, then a PATH walk for `claude`. Pinned in the rendered
+   * unit because systemd / launchd start with sanitised PATHs that rarely
+   * include `~/.local/bin` or fnm/nvm/mise version dirs.
+   */
+  claudeBin?: string;
   /** Skip running the loader commands (write the unit file but don't enable). */
   dryRun?: boolean;
 }
@@ -29,6 +38,7 @@ export interface ServiceInstallResult {
   runtimeDir: string;
   stateDir: string;
   nodeBin: string;
+  claudeBin: string;
   loaderOutput: string[];
   postInstallHints: string[];
 }
@@ -123,6 +133,7 @@ interface ServiceContext {
   runtimeDir: string;
   stateDir: string;
   nodeBin: string;
+  claudeBin: string;
   user: string;
 }
 
@@ -138,9 +149,34 @@ async function resolveServiceContext(opts: ServiceOptions): Promise<ServiceConte
   const runtimeDir = path.resolve(here, "..", "..", "..");
   const stateDir = resolveStateDir(opts.stateDir);
   const nodeBin = opts.nodeBin ?? process.execPath;
+  const claudeBin = resolveClaudeBin(opts.claudeBin);
   const user = userInfo().username;
 
-  return { platform: plat, runtimeDir, stateDir, nodeBin, user };
+  return { platform: plat, runtimeDir, stateDir, nodeBin, claudeBin, user };
+}
+
+function resolveClaudeBin(override: string | undefined): string {
+  const explicit = override ?? process.env.VERONA_CLAUDE_BIN;
+  if (explicit) return explicit;
+
+  const found = findOnPath("claude");
+  if (found) return found;
+
+  throw new ConfigError(
+    "could not locate the `claude` CLI on PATH. " +
+      "Install it (https://docs.claude.com/en/docs/claude-code) and run `claude login`, " +
+      "or pass --claude-bin /path/to/claude.",
+  );
+}
+
+function findOnPath(name: string): string | undefined {
+  const pathEnv = process.env.PATH ?? "";
+  for (const dir of pathEnv.split(delimiter)) {
+    if (!dir) continue;
+    const candidate = path.join(dir, name);
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 async function installLinux(ctx: ServiceContext, dryRun: boolean): Promise<ServiceInstallResult> {
@@ -153,7 +189,8 @@ async function installLinux(ctx: ServiceContext, dryRun: boolean): Promise<Servi
   const rendered = (await readFile(templatePath, "utf8"))
     .replaceAll("{{VERONA_RUNTIME}}", ctx.runtimeDir)
     .replaceAll("{{VERONA_STATE_DIR}}", ctx.stateDir)
-    .replaceAll("{{NODE_BIN}}", ctx.nodeBin);
+    .replaceAll("{{NODE_BIN}}", ctx.nodeBin)
+    .replaceAll("{{CLAUDE_BIN}}", ctx.claudeBin);
 
   const unitDir = path.join(homedir(), ".config", "systemd", "user");
   const unitPath = path.join(unitDir, "verona-daemon.service");
@@ -185,6 +222,7 @@ async function installLinux(ctx: ServiceContext, dryRun: boolean): Promise<Servi
     runtimeDir: ctx.runtimeDir,
     stateDir: ctx.stateDir,
     nodeBin: ctx.nodeBin,
+    claudeBin: ctx.claudeBin,
     loaderOutput,
     postInstallHints: hints,
   };
@@ -201,6 +239,7 @@ async function installDarwin(ctx: ServiceContext, dryRun: boolean): Promise<Serv
     .replaceAll("{{VERONA_RUNTIME}}", ctx.runtimeDir)
     .replaceAll("{{VERONA_STATE_DIR}}", ctx.stateDir)
     .replaceAll("{{NODE_BIN}}", ctx.nodeBin)
+    .replaceAll("{{CLAUDE_BIN}}", ctx.claudeBin)
     .replaceAll("{{USER}}", ctx.user);
 
   const unitDir = path.join(homedir(), "Library", "LaunchAgents");
@@ -232,6 +271,7 @@ async function installDarwin(ctx: ServiceContext, dryRun: boolean): Promise<Serv
     runtimeDir: ctx.runtimeDir,
     stateDir: ctx.stateDir,
     nodeBin: ctx.nodeBin,
+    claudeBin: ctx.claudeBin,
     loaderOutput,
     postInstallHints: hints,
   };
@@ -330,6 +370,7 @@ export function formatInstallResult(r: ServiceInstallResult): string {
   lines.push(`  runtime: ${r.runtimeDir}`);
   lines.push(`  state:   ${r.stateDir}`);
   lines.push(`  node:    ${r.nodeBin}`);
+  lines.push(`  claude:  ${r.claudeBin}`);
   if (r.loaderOutput.length > 0) {
     lines.push("");
     for (const block of r.loaderOutput) {
