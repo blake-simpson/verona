@@ -13,3 +13,8 @@ export function memoryGuardScriptPath(): string {
   const here = path.dirname(fileURLToPath(import.meta.url));
   return path.resolve(here, "memory-guard.sh");
 }
+
+export function connectorGuardScriptPath(): string {
+  const here = path.dirname(fileURLToPath(import.meta.url));
+  return path.resolve(here, "connector-guard.sh");
+}

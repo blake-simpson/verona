@@ -30,7 +30,8 @@ The `verona agents init` command:
 | Template | What it demonstrates |
 |---|---|
 | `hello-world` | Minimal smoke test. Single cron task, no connectors. Run this first to confirm Verona is wired correctly on your host. |
-| `researcher` | Full bidirectional flow — cron 03:00 nightly scan + on_message thread replies + Slack channel + WebFetch tool. Closest to a real production agent. |
+| `slack-pingpong` | Smallest correct shape of the bi-directional Slack flow. Manual-trigger task posts via `slack__send_message`; user replies in thread; Verona resumes the session and the agent replies in-thread via the same tool. Run this second, after `hello-world`, to confirm Slack inbound + outbound work end-to-end. |
+| `researcher` | Full production-shape agent — cron 03:00 nightly scan + Slack channel + WebFetch + thread-reply continuation. Closest to what real agents look like. |
 
 ## Why a separate user-agents dir?
 

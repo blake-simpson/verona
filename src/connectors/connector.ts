@@ -6,9 +6,18 @@
  *   - webhook     : HTTP POST out + optional inbound HTTP server (bidirectional)
  *   - web-fetch   : outbound fetch + readability extraction (outbound-only)
  *
+ * A connector has two halves:
+ *   - daemon-side (long-lived): owns I/O that must outlive a spawn — Socket
+ *     Mode WebSocket, webhook HTTP listener, OAuth refresh, inbound delivery.
+ *     `start()` / `stop()` / `send()` live here.
+ *   - spawn-side (per-task): owns capability invocation during one claude-p
+ *     spawn. The MCP server dispatches `capabilities()` entries as MCP tools.
+ *
  * See knowledge/architecture/connector-contract.md for the invariants every
  * connector must obey.
  */
+
+import type { ConnectorCapability } from "./capability.js";
 
 export type ConnectorId = string;
 
@@ -19,6 +28,38 @@ export interface ConnectorContext {
   deliver(event: InboundEvent): Promise<void>;
   /** Audit-log a connector send/receive. Connectors emit one record per call. */
   audit(record: ConnectorAuditRecord): void;
+  /**
+   * Per-state runs dir, e.g. <state>/runs/. Connectors that download inbound
+   * attachments stage them under <runsDir>/<runId>/inbound/<filename> so the
+   * dispatcher can hand the dir to the agent's --add-dir for `Read`.
+   */
+  runsDir: string;
+  /**
+   * Cross-agent threadKey lookup. Used by message-event handlers that don't
+   * carry an explicit agent target (e.g. Slack thread reply without an
+   * @-mention). Returns null when no agent has anchored this thread.
+   */
+  resolveAgentForThread(
+    threadKey: string,
+  ): Promise<{ agentName: string; sessionId: string } | null>;
+}
+
+export type InboundEventKind = "mention" | "dm" | "thread_reply" | "channel_message";
+
+export interface InboundAttachment {
+  /** Human-friendly filename used in the prompt manifest. */
+  filename: string;
+  /** MIME type as reported by the source. */
+  mimeType?: string;
+  /**
+   * Absolute path inside the per-run scratch dir (<runsDir>/<runId>/inbound/...).
+   * The dispatcher adds the dir to the agent's --add-dir so Read can open it.
+   */
+  localPath: string;
+  /** Size in bytes after download. */
+  size: number;
+  /** Connector-native source handle (URL, file_id, etc.). Diagnostic only. */
+  source?: unknown;
 }
 
 export interface InboundEvent {
@@ -30,8 +71,17 @@ export interface InboundEvent {
    */
   runId: string;
   /**
-   * Specific agent to route to. Null means dispatcher figures it out from
-   * @-mention or routing config.
+   * What kind of inbound this is. Drives routing in `Daemon.handleInbound`:
+   *   "mention"        — @-mention in a channel; agentTarget pre-resolved by connector.
+   *   "dm"             — direct message to the bot; agentTarget pre-resolved.
+   *   "thread_reply"   — reply in a thread without @-mention; agentTarget=null,
+   *                      daemon resolves via SessionStore.findByThreadKey.
+   *   "channel_message"— reserved for future free-channel listening.
+   */
+  kind?: InboundEventKind;
+  /**
+   * Specific agent to route to. Null means dispatcher figures it out — for
+   * thread replies that means SessionStore.findByThreadKey(threadKey).
    */
   agentTarget: string | null;
   /**
@@ -39,8 +89,16 @@ export interface InboundEvent {
    * The dispatcher uses it to look up the prior session ID for `--resume`.
    */
   threadKey?: string;
+  /** Connector-native channel id. Diagnostic + future routing. */
+  channelId?: string;
   text: string;
   user?: { id: string; display: string };
+  /**
+   * Files the user attached. The connector has already downloaded them into
+   * <runsDir>/<runId>/inbound/. The dispatcher adds the run dir to --add-dir
+   * and prepends a manifest section to the user prompt.
+   */
+  attachments?: readonly InboundAttachment[];
   /** Connector-native event payload, for debugging. Don't depend on shape. */
   raw: unknown;
 }
@@ -90,8 +148,22 @@ export interface Connector {
   /**
    * Required if direction includes "outbound". Resolves on transport accept,
    * not delivery. Throws ConnectorSendError on failure.
+   *
+   * NOTE: this is the *system-side* outbound (daemon notifications, legacy
+   * inbound auto-post). The agent's outbound is via `capabilities()` — see
+   * `src/connectors/capability.ts`.
    */
   send?(msg: OutboundMessage): Promise<void>;
+  /**
+   * Tool catalog the connector exposes to agents that have it in their
+   * subscriptions. Returned list is enumerated by the per-spawn MCP server
+   * and registered as MCP tools named `mcp__verona__<id>__<capability.name>`.
+   *
+   * Connectors with `direction: "inbound"` may still expose read-only
+   * capabilities (e.g. `list_recent`). Connectors with `direction: "outbound"`
+   * usually expose at least one capability.
+   */
+  capabilities?(): readonly ConnectorCapability[];
 }
 
 /**

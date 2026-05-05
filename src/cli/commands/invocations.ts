@@ -59,6 +59,12 @@ function formatRecord(r: AuditRecord): string {
   if (r.type === "connector_send") {
     return `${ts} ${ok} ${r.type.padEnd(20)} ${r.agent ?? "?"} via=${r.connector} dest=${r.destination} ${r.messageBytes}b run=${r.runId.slice(0, 8)}`;
   }
+  if (r.type === "connector_call") {
+    const dest = r.destination ? ` dest=${r.destination}` : "";
+    const thread = r.threadKey ? ` thread=${r.threadKey}` : "";
+    return `${ts} ${ok} ${r.type.padEnd(20)} ${r.agent ?? "?"} via=${r.connector} cap=${r.capability}${dest}${thread} ${r.messageBytes}b run=${r.runId.slice(0, 8)}`;
+  }
+  // connector_receive
   return `${ts} ${ok} ${r.type.padEnd(20)} ${r.agent ?? "(unrouted)"} via=${r.connector} from=${r.fromUser ?? "?"} ${r.messageBytes}b run=${r.runId.slice(0, 8)}`;
 }
 

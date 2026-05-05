@@ -10,7 +10,7 @@
  * runs that don't continue, the key can be a synthetic per-run ULID or omitted.
  */
 
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 interface SessionFile {
@@ -45,6 +45,35 @@ export class SessionStore {
     if (!(threadKey in file)) return;
     delete file[threadKey];
     await this.write(agentName, file);
+  }
+
+  /**
+   * Cross-agent lookup: which agent (if any) has anchored this threadKey?
+   * Used by the inbound dispatch path for thread replies that don't @-mention
+   * the bot — Slack only tells us the parent message's thread_ts; we ask the
+   * SessionStore "who anchored this?" and route there.
+   *
+   * Scans every <state>/sessions/<agent>.json. v1 acceptable: N agents per host
+   * is small. If this becomes a hot path, build an in-memory reverse index.
+   */
+  async findByThreadKey(
+    threadKey: string,
+  ): Promise<{ agentName: string; sessionId: string } | null> {
+    let entries: string[];
+    try {
+      entries = (await readdir(this.dir)) as string[];
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+      throw err;
+    }
+    for (const name of entries) {
+      if (!name.endsWith(".json")) continue;
+      const agentName = name.slice(0, -".json".length);
+      const file = await this.read(agentName);
+      const entry = file[threadKey];
+      if (entry) return { agentName, sessionId: entry.sessionId };
+    }
+    return null;
   }
 
   private filePath(agentName: string): string {

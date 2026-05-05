@@ -1,0 +1,45 @@
+[agent]
+name = "slack-pingpong"
+description = "Smallest correct example of Verona's bi-directional Slack flow: post a message via a tool call, then resume from the user's thread reply."
+adapter = "claude-cli"
+default_effort = "low"
+
+[soul]
+file = "./SOUL.md"
+
+[memory]
+index = "./memory/INDEX.md"
+self_learning = false
+episodic_retention_days = 7
+working_retention_days = 1
+
+[connectors]
+# Replace with your real test channel id (a C…/G… id, NOT a U… user id).
+# In Slack: right-click the channel → "View channel details" → bottom of the
+# modal → "Copy channel ID". Make sure your bot is invited to it.
+slack = { channel = "REPLACE_WITH_CHANNEL_ID" }
+
+[[tasks]]
+id = "ping"
+prompt = "./tasks/ping.md"
+# Far-future cron expression — this template is meant to be triggered manually
+# with `verona schedule run <agent>:ping` so you can watch the bi-directional
+# flow end-to-end. Replace with a real schedule once you adapt it.
+schedule = "0 0 1 1 *"
+effort = "low"
+# Read/Write are for memory I/O only. The dispatcher automatically extends
+# allowed_tools with `mcp__verona__*` because of the [connectors.slack] block
+# above, so the agent can call slack__send_message without listing it here.
+allowed_tools = ["Read", "Write"]
+
+# How follow-ups work:
+#
+#   1. The cron task posts a message via slack__send_message. The returned
+#      message ts is anchored to this run's claude -p session id.
+#   2. A user reply in that thread (with or without an @-mention) lands as an
+#      inbound event. The daemon looks up the thread anchor and resumes the
+#      same session — the user message becomes the next turn.
+#   3. The agent reads the SOUL, sees it's resuming, and calls
+#      slack__send_message again with thread_ts to reply in the thread.
+#
+# No `on_message` task block is needed — the default reply path covers it.

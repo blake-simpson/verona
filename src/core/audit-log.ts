@@ -18,7 +18,11 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import type { AdapterId, AdapterTokenUsage, Effort } from "../adapters/adapter.js";
 
-export type AuditRecordType = "adapter_invocation" | "connector_send" | "connector_receive";
+export type AuditRecordType =
+  | "adapter_invocation"
+  | "connector_send"
+  | "connector_receive"
+  | "connector_call";
 
 interface AuditRecordBase {
   ts: string;
@@ -60,7 +64,28 @@ export interface ConnectorReceiveRecord extends AuditRecordBase {
   messageBytes: number;
 }
 
-export type AuditRecord = AdapterInvocationRecord | ConnectorSendRecord | ConnectorReceiveRecord;
+/**
+ * Agent-driven outbound: one record per `mcp__verona__<connector>__<capability>`
+ * tool call. Joined to the parent `adapter_invocation` by runId.
+ *
+ * Distinct from `connector_send`, which is the system's daemon-side outbound
+ * (legacy auto-post, daemon notifications). `connector_call` means the agent
+ * itself decided to invoke the capability.
+ */
+export interface ConnectorCallRecord extends AuditRecordBase {
+  type: "connector_call";
+  connector: string;
+  capability: string;
+  destination?: string;
+  threadKey?: string;
+  messageBytes: number;
+}
+
+export type AuditRecord =
+  | AdapterInvocationRecord
+  | ConnectorSendRecord
+  | ConnectorReceiveRecord
+  | ConnectorCallRecord;
 
 export interface AuditLogInit {
   /** Active log file path, e.g. <state>/invocations.ndjson */
@@ -205,6 +230,7 @@ function matchesFilter(r: AuditRecord, f: AuditFilter): boolean {
   if (f.task && r.type !== "adapter_invocation") return false;
   if (f.connector) {
     if (r.type === "adapter_invocation") return false;
+    // ConnectorSend/Receive/Call all carry `connector` field
     if (r.connector !== f.connector) return false;
   }
   if (f.since && r.ts < f.since) return false;

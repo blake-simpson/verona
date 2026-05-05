@@ -70,13 +70,15 @@ export async function buildRuntime(opts: BuildOptions = {}): Promise<{ outDir: s
   // Compiled JS
   await cp(path.join(REPO_ROOT, "dist"), path.join(outDir, "dist"), { recursive: true });
 
-  // Hook script — tsc doesn't compile shell, copy explicitly.
+  // Hook scripts — tsc doesn't compile shell, copy explicitly.
   await mkdir(path.join(outDir, "dist", "hooks"), { recursive: true });
-  await copyFile(
-    path.join(REPO_ROOT, "src", "hooks", "memory-guard.sh"),
-    path.join(outDir, "dist", "hooks", "memory-guard.sh"),
-  );
-  await chmod(path.join(outDir, "dist", "hooks", "memory-guard.sh"), 0o755);
+  for (const sh of ["memory-guard.sh", "connector-guard.sh"]) {
+    await copyFile(
+      path.join(REPO_ROOT, "src", "hooks", sh),
+      path.join(outDir, "dist", "hooks", sh),
+    );
+    await chmod(path.join(outDir, "dist", "hooks", sh), 0o755);
+  }
 
   // bin/verona
   await mkdir(path.join(outDir, "bin"), { recursive: true });

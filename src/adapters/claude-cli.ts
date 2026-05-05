@@ -59,6 +59,15 @@ export class ClaudeCliAdapter implements AIAdapter {
     if (req.hookSettingsPath) {
       args.push("--settings", req.hookSettingsPath);
     }
+    if (req.mcpConfigPath) {
+      args.push("--mcp-config", req.mcpConfigPath);
+    }
+    if (req.runDir) {
+      // Per-run scratch dir gets its own --add-dir so Read can access inbound
+      // attachments and Write can stage outbound files. Stays distinct from
+      // the agent's working dir.
+      args.push("--add-dir", req.runDir);
+    }
     if (req.budgetUsd !== undefined) {
       args.push("--max-budget-usd", String(req.budgetUsd));
     }
@@ -75,7 +84,7 @@ export class ClaudeCliAdapter implements AIAdapter {
 
     args.push(req.userPrompt);
 
-    const env = scrubEnv(process.env, req.workingDir);
+    const env = scrubEnv(process.env, req.workingDir, req.connectorPolicyPath);
 
     const startedAt = Date.now();
     const result = await spawnClaude(args, env, req.cancel);
@@ -146,7 +155,11 @@ function isResultEvent(e: unknown): e is ClaudeResultEvent {
   return typeof e === "object" && e !== null && (e as { type?: unknown }).type === "result";
 }
 
-function scrubEnv(parent: NodeJS.ProcessEnv, agentDir: string): NodeJS.ProcessEnv {
+function scrubEnv(
+  parent: NodeJS.ProcessEnv,
+  agentDir: string,
+  connectorPolicyPath?: string,
+): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...parent };
   // Subscription-only path: ensure the CLI doesn't fall back to API-key auth.
   // We must DELETE these keys, not set to undefined: spawn() passes
@@ -158,6 +171,10 @@ function scrubEnv(parent: NodeJS.ProcessEnv, agentDir: string): NodeJS.ProcessEn
   delete env.ANTHROPIC_AUTH_TOKEN;
   // memory-guard.sh reads this to validate write paths.
   env.VERONA_AGENT_DIR = agentDir;
+  if (connectorPolicyPath) {
+    // connector-guard.sh reads this to validate mcp__verona__* tool calls.
+    env.VERONA_CONNECTOR_POLICY = connectorPolicyPath;
+  }
   return env;
 }
 

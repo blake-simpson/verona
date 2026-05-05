@@ -7,7 +7,7 @@
  *   → register handlers (SIGINT/SIGTERM) → start scheduler → idle until signal
  */
 
-import { rm, writeFile } from "node:fs/promises";
+import { readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ulid } from "ulidx";
 import type { AIAdapter } from "../adapters/adapter.js";
@@ -15,10 +15,12 @@ import { AnthropicApiAdapter } from "../adapters/anthropic-api.js";
 import { ClaudeCliAdapter } from "../adapters/claude-cli.js";
 import { OpenAICompatAdapter } from "../adapters/openai-compat.js";
 import { loadAgentConfig, loadVeronaConfig } from "../config/loader.js";
-import type { AgentConfig, ConnectorManifest, VeronaConfig } from "../config/schema.js";
+import type { ConnectorManifest, VeronaConfig } from "../config/schema.js";
 import type { Connector, ConnectorContext, InboundEvent } from "../connectors/connector.js";
 import { SlackConnector } from "../connectors/slack/index.js";
-import { memoryGuardScriptPath } from "../hooks/locate.js";
+import { connectorGuardScriptPath, memoryGuardScriptPath } from "../hooks/locate.js";
+import type { SpawnSubscription } from "../mcp/spawn-config.js";
+import { buildDefaultReplyPrompt } from "./default-reply-prompt.js";
 import { getSecret } from "../secrets/store.js";
 import { listRegisteredAgents, refreshRegisteredAgents } from "../state/agent-registry.js";
 import {
@@ -40,6 +42,18 @@ import { type AgentSchedule, Scheduler } from "./scheduler.js";
 import { SessionStore } from "./session-store.js";
 import { UserSync } from "./user-sync.js";
 
+/**
+ * Built-in connectors and the secret keys they need at spawn time. Slack's
+ * spawn-side capabilities only need the bot token (no Socket Mode). Webhook
+ * and web-fetch don't need any spawn-side secrets in v1; their config block
+ * carries auth/URL.
+ */
+const BUILT_IN_SPAWN_SECRETS: Readonly<Record<string, readonly string[]>> = {
+  slack: ["bot_token"],
+  webhook: [],
+  "web-fetch": [],
+};
+
 interface ConnectorMeta {
   isUserConnector: boolean;
   manifest?: ConnectorManifest;
@@ -55,6 +69,7 @@ export class Daemon {
   private scheduler?: Scheduler;
   private adapters: Map<string, AIAdapter> = new Map();
   private guardScriptPath: string;
+  private connectorGuardScriptPath: string;
   private signalHandlers: Map<NodeJS.Signals, () => void> = new Map();
   private auditLog: AuditLog;
   private sessionStore: SessionStore;
@@ -74,6 +89,7 @@ export class Daemon {
   constructor(init: DaemonInit) {
     this.stateDir = init.stateDir;
     this.guardScriptPath = memoryGuardScriptPath();
+    this.connectorGuardScriptPath = connectorGuardScriptPath();
     const paths = statePaths(init.stateDir);
     this.auditLog = new AuditLog({
       filePath: paths.invocations,
@@ -279,6 +295,13 @@ export class Daemon {
 
     await this.bootstrapConnectors();
 
+    // Drop any per-run scratch dirs older than the TTL. These are created by
+    // the dispatcher per claude-p spawn (MCP config + anchors + inbound
+    // attachments). A clean shutdown drains the dir; crashed/killed spawns
+    // leave one behind, and we don't want them to accumulate or to confuse
+    // a future startup. Soft cleanup: failures are warnings.
+    await this.recoverStaleRunDirs();
+
     if (this.veronaConfig.user_sync.enabled) {
       this.userSync = new UserSync({
         enabled: this.veronaConfig.user_sync.enabled,
@@ -295,9 +318,52 @@ export class Daemon {
     await this.startUserConnectors();
   }
 
+  /**
+   * TTL-based cleanup of <state>/runs/* dirs left by previous spawns. The
+   * dispatcher writes the per-run MCP config, hook policy, anchors NDJSON,
+   * and (Phase 3) inbound attachments under <runDir>. A clean run drains
+   * what it needs (anchors → SessionStore) and we don't bother deleting it
+   * on the hot path; this scan removes anything older than the configured
+   * TTL. Default 24h. Failures are warnings — the daemon still starts.
+   */
+  private async recoverStaleRunDirs(): Promise<void> {
+    const paths = statePaths(this.stateDir);
+    const ttlMs = 24 * 60 * 60 * 1000;
+    let entries: string[];
+    try {
+      entries = (await readdir(paths.runs)) as string[];
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      process.stderr.write(`[daemon] recoverStaleRunDirs: readdir failed — ${String(err)}\n`);
+      return;
+    }
+    const now = Date.now();
+    let removed = 0;
+    for (const name of entries) {
+      const full = path.join(paths.runs, name);
+      try {
+        const s = await stat(full);
+        if (!s.isDirectory()) continue;
+        if (now - s.mtimeMs < ttlMs) continue;
+        await rm(full, { recursive: true, force: true });
+        removed += 1;
+      } catch (err) {
+        process.stderr.write(
+          `[daemon] recoverStaleRunDirs: failed to inspect/remove ${full} — ${String(err)}\n`,
+        );
+      }
+    }
+    if (removed > 0) {
+      process.stderr.write(`[daemon] recoverStaleRunDirs: removed ${removed} stale run dir(s)\n`);
+    }
+  }
+
   private getConnectorCtx(): ConnectorContext {
     if (this.connectorCtx) return this.connectorCtx;
+    const paths = statePaths(this.stateDir);
     this.connectorCtx = {
+      runsDir: paths.runs,
+      resolveAgentForThread: (threadKey) => this.sessionStore.findByThreadKey(threadKey),
       deliver: (event) => this.handleInbound(event),
       audit: (record) => {
         const base = {
@@ -415,10 +481,17 @@ export class Daemon {
    * Either way, the response posts back via the originating connector.
    */
   async handleInbound(event: InboundEvent): Promise<void> {
-    const agentName = event.agentTarget;
+    // Thread replies often arrive without an explicit agentTarget — the
+    // connector only knows the thread_ts. Resolve via SessionStore: whichever
+    // agent anchored that thread is the right recipient.
+    let agentName = event.agentTarget;
+    if (!agentName && event.threadKey) {
+      const found = await this.sessionStore.findByThreadKey(event.threadKey);
+      if (found) agentName = found.agentName;
+    }
     if (!agentName) {
       process.stderr.write(
-        `[${event.connectorId}] inbound event has no agentTarget; ignoring (text="${event.text.slice(0, 60)}")\n`,
+        `[${event.connectorId}] inbound event has no agentTarget and no anchored threadKey; ignoring (text="${event.text.slice(0, 60)}")\n`,
       );
       return;
     }
@@ -453,6 +526,27 @@ export class Daemon {
     const allowedTools = onMsgTask?.allowed_tools ?? defaultReplyTools;
     const budgetUsd = onMsgTask?.budget_usd;
 
+    const subscriptions = await this.buildSpawnSubscriptions({
+      agentName,
+      agentConnectors: agent.config.connectors,
+    });
+    const paths = statePaths(this.stateDir);
+
+    // Build the user-prompt the agent sees. Two augmentations:
+    //   - Always inject a verona-context block so the agent reliably has
+    //     `thread_ts`, `channel`, and `connector` to feed into its tool
+    //     calls. Without this, agents that didn't post in this session (e.g.
+    //     a fresh @-mention) have no way to know which thread to reply in.
+    //   - When the agent has connector subscriptions but no on_message task,
+    //     also prepend the framework's default reply directive so the model
+    //     reaches for the connector tool instead of plain text.
+    const userMessage = composeInboundUserMessage({
+      event,
+      subscriptions,
+      hasOnMessageTask: onMsgTask !== undefined,
+      defaultChannel: (agent.config.connectors.slack as { channel?: string } | undefined)?.channel,
+    });
+
     const result = await dispatch({
       agentDir: agent.agentDir,
       agentName,
@@ -461,12 +555,22 @@ export class Daemon {
       trigger,
       adapter,
       guardScriptPath: this.guardScriptPath,
+      connectorGuardScriptPath: this.connectorGuardScriptPath,
       auditLog: this.auditLog,
+      sessionStore: this.sessionStore,
+      runsDir: paths.runs,
+      auditLogPath: paths.invocations,
+      stateDir: paths.root,
       runId,
-      userMessage: event.text,
+      userMessage,
+      ...(subscriptions.length > 0 && { subscriptions }),
       ...(onMsgTask?.prompt !== undefined && { promptPath: onMsgTask.prompt }),
       ...(sessionId !== null && { sessionId }),
       ...(budgetUsd !== undefined && { budgetUsd }),
+      ...(event.attachments &&
+        event.attachments.length > 0 && {
+          attachments: event.attachments,
+        }),
       allowedTools,
     });
 
@@ -474,7 +578,14 @@ export class Daemon {
       await this.sessionStore.setSession(agentName, threadKey, result.response.sessionId);
     }
 
-    // Post the response back via the originating connector (Slack only for now).
+    // Legacy auto-post fallback. Agents that called slack__send_message (or
+    // any other capability against the originating connector) already spoke
+    // for themselves; skip auto-posting their final assistant text in that
+    // case so we don't double-message. Agents that took no action via the
+    // tool plane fall back to the v0.3 behaviour.
+    if (result.connectorIdsCalled.has(event.connectorId)) {
+      return;
+    }
     const connector = this.connectors.get(event.connectorId);
     if (connector?.send) {
       const slackCfg = agent.config.connectors.slack as { channel?: string } | undefined;
@@ -547,6 +658,59 @@ export class Daemon {
   }
 
   /**
+   * Build the spawn-side subscription list for a single agent. One entry per
+   * `[connectors.<id>]` block in the agent's config, paired with resolved
+   * secrets the spawn-side connector needs.
+   *
+   * For built-ins, the secret keys come from `BUILT_IN_SPAWN_SECRETS`. For
+   * user connectors they come from the connector's manifest.
+   *
+   * Subscriptions for which a required secret is missing or for which no
+   * connector is registered are skipped (with a stderr warning) — the spawn
+   * still starts, just without those tools.
+   */
+  private async buildSpawnSubscriptions(input: {
+    agentName: string;
+    agentConnectors: Record<string, unknown>;
+  }): Promise<SpawnSubscription[]> {
+    const paths = statePaths(this.stateDir);
+    const out: SpawnSubscription[] = [];
+    for (const [id, cfg] of Object.entries(input.agentConnectors)) {
+      if (!cfg || typeof cfg !== "object") continue;
+      const config = cfg as Record<string, unknown>;
+      let secretKeys: readonly string[];
+      if (id in BUILT_IN_SPAWN_SECRETS) {
+        secretKeys = BUILT_IN_SPAWN_SECRETS[id] as readonly string[];
+      } else {
+        const meta = this.connectorMeta.get(id);
+        if (!meta?.manifest) {
+          process.stderr.write(
+            `[daemon] ${input.agentName}: declares [connectors.${id}] but no such connector is registered; spawn-side tools skipped\n`,
+          );
+          continue;
+        }
+        secretKeys = meta.manifest.secrets;
+      }
+      const secrets: Record<string, string> = {};
+      let missing = false;
+      for (const key of secretKeys) {
+        const value = await getSecret(paths.secrets, { kind: "connector", id }, key);
+        if (value === null) {
+          process.stderr.write(
+            `[daemon] ${input.agentName}: connector "${id}" missing secret "${key}"; spawn-side tools for this connector skipped\n`,
+          );
+          missing = true;
+          break;
+        }
+        secrets[key] = value.trim();
+      }
+      if (missing) continue;
+      out.push({ id, config, secrets });
+    }
+    return out;
+  }
+
+  /**
    * Run a single task immediately (manual trigger / `verona schedule run`).
    */
   async runTask(input: {
@@ -573,7 +737,13 @@ export class Daemon {
 
     const effort = task.effort ?? cfg.agent.default_effort;
 
-    const result = await dispatch({
+    const subscriptions = await this.buildSpawnSubscriptions({
+      agentName: input.agentName,
+      agentConnectors: cfg.connectors,
+    });
+    const paths = statePaths(this.stateDir);
+
+    await dispatch({
       agentDir: agentRoot,
       agentName: input.agentName,
       taskId: input.taskId,
@@ -582,68 +752,18 @@ export class Daemon {
       trigger: input.trigger,
       adapter,
       guardScriptPath: this.guardScriptPath,
+      connectorGuardScriptPath: this.connectorGuardScriptPath,
       auditLog: this.auditLog,
+      sessionStore: this.sessionStore,
+      runsDir: paths.runs,
+      auditLogPath: paths.invocations,
+      stateDir: paths.root,
+      ...(subscriptions.length > 0 && { subscriptions }),
       ...(task.budget_usd !== undefined && { budgetUsd: task.budget_usd }),
       ...(task.allowed_tools && { allowedTools: task.allowed_tools }),
       ...(input.userMessage !== undefined && { userMessage: input.userMessage }),
       ...(input.sessionId !== undefined && { sessionId: input.sessionId }),
     });
-
-    if (task.post_response) {
-      await this.postTaskResponse({
-        agentName: input.agentName,
-        connectorsCfg: cfg.connectors,
-        runId: result.runId,
-        text: result.response.text,
-      });
-    }
-  }
-
-  /**
-   * Post a cron/manual task's final assistant message to the agent's
-   * configured outbound connector. Only Slack today; routes via
-   * `[connectors] slack = { channel = "..." }`. Failures here are warnings,
-   * not errors — the task itself succeeded; we just couldn't ship the post.
-   */
-  private async postTaskResponse(input: {
-    agentName: string;
-    connectorsCfg: AgentConfig["connectors"];
-    runId: string;
-    text: string;
-  }): Promise<void> {
-    const slackCfg = input.connectorsCfg.slack as { channel?: string } | undefined;
-    const destination = slackCfg?.channel;
-    if (!destination) {
-      process.stderr.write(
-        `[daemon] ${input.agentName}: post_response set but no [connectors] slack.channel configured; skipping post\n`,
-      );
-      return;
-    }
-    const connector = this.connectors.get("slack");
-    if (!connector?.send) {
-      process.stderr.write(
-        `[daemon] ${input.agentName}: post_response set but slack connector is not running (tokens missing?); skipping post\n`,
-      );
-      return;
-    }
-    if (!input.text.trim()) {
-      process.stderr.write(
-        `[daemon] ${input.agentName}: post_response set but the agent's final message was empty; skipping post\n`,
-      );
-      return;
-    }
-    try {
-      await connector.send({
-        connectorId: "slack",
-        runId: input.runId,
-        agent: input.agentName,
-        destination,
-        text: input.text,
-      });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`[daemon] ${input.agentName}: post_response failed — ${msg}\n`);
-    }
   }
 
   private async loadAgents(): Promise<AgentSchedule[]> {
@@ -682,4 +802,47 @@ export class Daemon {
     }
     this.signalHandlers.clear();
   }
+}
+
+/**
+ * Build the user-prompt body for an inbound dispatch. Two augmentations:
+ *   1. Always prepend a `verona-context` block so the agent reliably has
+ *      `thread_ts`, `channel`, and `connector` to feed into its tool calls.
+ *   2. When the agent has subscriptions but no on_message task, prepend the
+ *      framework default reply directive (lists tools + reply protocol).
+ *
+ * Output shape:
+ *
+ *   <directive (optional)>
+ *
+ *   <verona-context>
+ *   connector: slack
+ *   channel: C0...
+ *   thread_ts: 1700000000.000000
+ *   </verona-context>
+ *
+ *   <user text>
+ */
+export function composeInboundUserMessage(input: {
+  event: InboundEvent;
+  subscriptions: readonly SpawnSubscription[];
+  hasOnMessageTask: boolean;
+  defaultChannel: string | undefined;
+}): string {
+  const { event, subscriptions, hasOnMessageTask, defaultChannel } = input;
+
+  const ctxLines = ["<verona-context>", `connector: ${event.connectorId}`];
+  const channel = event.channelId ?? defaultChannel;
+  if (channel) ctxLines.push(`channel: ${channel}`);
+  if (event.threadKey) ctxLines.push(`thread_ts: ${event.threadKey}`);
+  ctxLines.push("</verona-context>");
+  const contextBlock = ctxLines.join("\n");
+
+  const directive = hasOnMessageTask ? null : buildDefaultReplyPrompt(subscriptions);
+
+  const sections: string[] = [];
+  if (directive) sections.push(directive);
+  sections.push(contextBlock);
+  sections.push(event.text);
+  return sections.join("\n\n");
 }

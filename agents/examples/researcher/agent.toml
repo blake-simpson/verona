@@ -15,6 +15,8 @@ working_retention_days = 7
 
 [connectors]
 # Replace `#research-feed` with the actual channel id or "#name" for your workspace.
+# Subscribing here automatically exposes `mcp__verona__slack__send_message` and
+# `mcp__verona__slack__upload_attachment` to the agent.
 slack = { channel = "#research-feed" }
 
 [[tasks]]
@@ -24,14 +26,21 @@ schedule = "0 3 * * *"
 effort = "high"
 # WebSearch finds pages by topic; WebFetch reads a specific URL. A research
 # task usually needs both: search to discover candidates, fetch to read the
-# primary source. Read/Write are for memory I/O.
+# primary source. Read/Write are for memory I/O. The dispatcher extends
+# allowed_tools with `mcp__verona__*` automatically when [connectors.*]
+# blocks are set, so you don't need to list slack tools here.
 allowed_tools = ["Read", "Write", "WebFetch", "WebSearch"]
 
-# Slack thread replies don't need a separate task. When you @-mention this
-# agent in the channel where it posted a digest, the daemon resumes the same
-# `claude -p` session and your message becomes the next turn — the agent
-# already has the original task prompt + its response in context. The SOUL.md
-# tells it how to behave for follow-ups (re-fetch sources, stay terse, cite).
+# How follow-ups work — no separate `on_message` task needed:
 #
-# Add a `[[tasks]] on_message = true` block here only if you want a strict
+#   1. The cron task posts a digest via slack__send_message. The returned
+#      message ts is anchored to this run's claude -p session id.
+#   2. A user reply in that thread (with or without an @-mention) lands as
+#      an inbound event. The daemon looks up the thread anchor and resumes
+#      the same session — the user message becomes the next turn.
+#   3. The agent's SOUL drives reply behavior (re-fetch sources, stay terse,
+#      cite). It calls slack__send_message again, this time with thread_ts
+#      set, to reply inside the thread.
+#
+# Add a `[[tasks]] on_message = true` block only if you want a strict
 # inbound-message protocol (e.g. a triage prompt that runs on every reply).

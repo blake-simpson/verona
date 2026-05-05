@@ -13,13 +13,17 @@ claude -p
   --output-format stream-json
   --settings <path-to-generated-hook-settings.json>
   --add-dir <state>/agents/<name>
+  --add-dir <state>/runs/<runId>                 # only when subscriptions are set
   --append-system-prompt <SOUL + framing + INDEX>
-  --max-budget-usd <task.budget_usd>            # optional
-  --session-id <new-or-resumed-uuid>
-  --allowedTools "Read Write Edit WebFetch ..."  # from agent.toml
-  --resume <session-id>                          # only on continuation, not first call
+  --max-budget-usd <task.budget_usd>             # optional
+  --session-id <new-uuid>                        # new conversation
+  --resume <session-id>                          # continuation (mutually exclusive with --session-id)
+  --mcp-config <state>/runs/<runId>/mcp-config.json   # only when subscriptions are set
+  --allowedTools "Read Write Edit WebFetch ... mcp__verona__*"
   "<task prompt body>"
 ```
+
+`--mcp-config` is set whenever the agent has `[connectors.<id>]` blocks, pointing at a per-task config that names the verona MCP server (`dist/mcp/verona-mcp-server.js`) plus env vars naming the agent + run + subscriptions. Tools the server registers as `slack__send_message` appear to the agent as `mcp__verona__slack__send_message`. The dispatcher extends `allowed_tools` with `mcp__verona__*` automatically when subscriptions are non-empty.
 
 **Flags we DO NOT pass:**
 
@@ -34,7 +38,7 @@ The user runs `claude login` once on every host. The Claude CLI stores OAuth cre
 
 ## Hook settings shape
 
-`render-hook-settings.ts` writes a per-task settings JSON like:
+`render-hook-settings.ts` writes a per-task settings JSON with two PreToolUse matchers:
 
 ```json
 {
@@ -42,14 +46,25 @@ The user runs `claude login` once on every host. The Claude CLI stores OAuth cre
     "PreToolUse": [
       {
         "matcher": "Write|Edit",
-        "hooks": [{ "type": "command", "command": "/opt/verona/runtime/src/hooks/memory-guard.sh" }]
+        "hooks": [{ "type": "command", "command": "/opt/verona/runtime/dist/hooks/memory-guard.sh" }]
+      },
+      {
+        "matcher": "mcp__verona__.*",
+        "hooks": [{ "type": "command", "command": "/opt/verona/runtime/dist/hooks/connector-guard.sh" }]
       }
     ]
   }
 }
 ```
 
-The shell script reads `tool_input.file_path` from stdin and emits `permissionDecision: "deny"` for any path outside `memory/INDEX.md` or `memory/learned/**`.
+`memory-guard.sh` reads `tool_input.file_path` and denies writes outside `memory/INDEX.md` or `memory/learned/**`.
+
+`connector-guard.sh` reads the per-run policy file at `$VERONA_CONNECTOR_POLICY` (set by the adapter on the spawn env) and applies two layers:
+
+- **Layer A — destination allowlist.** For Slack, `tool_input.channel` must be in the agent's `[connectors.slack].channel(s)` list when one is declared.
+- **Layer B — sideEffect class.** Capabilities marked `sideEffect: "destructive"` are denied unless `[connectors.<id>].allow_destructive = true`. The dispatcher bakes per-capability sideEffect metadata into the policy file at run start by calling the same spawn-factory registry the MCP server uses.
+
+Both hook scripts always exit 0 — decisions are communicated via stdout JSON with `permissionDecision: "deny"`.
 
 ## Output parsing
 
@@ -69,6 +84,8 @@ The shell script reads `tool_input.file_path` from stdin and emits `permissionDe
 - Skip `--settings` → memory guard not active, agent can write anywhere.
 - Skip `--add-dir` → agent can't read its own memory.
 - Pass `ANTHROPIC_API_KEY` → claude-cli falls back to API-key auth even with subscription available; cost reporting becomes ambiguous.
+- Skip `--mcp-config` for an agent with subscriptions → agent has no `mcp__verona__*` tools, falls back to legacy daemon-side auto-post.
+- Forget to extend `allowed_tools` with `mcp__verona__*` → claude refuses to call connector tools even though they're advertised.
 
 ## Don't re-do
 
@@ -79,10 +96,14 @@ The shell script reads `tool_input.file_path` from stdin and emits `permissionDe
 ## Evidence
 
 - Plan: `~/.claude/plans/we-are-in-new-expressive-kay.md`
+- Connectors-as-tools plan: `~/.claude/plans/honestly-i-don-t-like-scalable-galaxy.md`
 - Adapter: `src/adapters/claude-cli.ts`
 - Hook renderer: `src/hooks/render-hook-settings.ts`
-- Hook script: `src/hooks/memory-guard.sh`
+- Hook scripts: `src/hooks/memory-guard.sh`, `src/hooks/connector-guard.sh`
+- MCP server: `src/mcp/verona-mcp-server.ts`
+- MCP config renderer: `src/mcp/spawn-config.ts`
 
 ## Revisions
 
 - 2026-05-02 — initial entry; subscription-OAuth-only contract codified.
+- 2026-05-05 — `--mcp-config` is now passed when the agent has connector subscriptions; second PreToolUse matcher (`mcp__verona__.*`) wires `connector-guard.sh` for destination + sideEffect gating; `--add-dir <runDir>` exposes per-run scratch (inbound attachments, outbound files).

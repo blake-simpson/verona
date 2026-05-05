@@ -31,6 +31,12 @@ export interface StatePaths {
   logs: string;
   invocations: string;
   costs: string;
+  /**
+   * Per-run scratch dirs, e.g. <state>/runs/<runId>/. Used by the dispatcher
+   * to render the per-task MCP config, hook policy file, and (Phase 3) house
+   * inbound attachments. Cleaned up by Daemon's startup recovery scan.
+   */
+  runs: string;
   veronaToml: string;
   /** Pidfile written by `verona daemon` so `verona reload` can find it. */
   daemonPid: string;
@@ -54,6 +60,7 @@ export function statePaths(stateDir: string): StatePaths {
     logs: path.join(root, "logs"),
     invocations: path.join(root, "invocations.ndjson"),
     costs: path.join(root, "costs"),
+    runs: path.join(root, "runs"),
     veronaToml: path.join(root, "verona.toml"),
     daemonPid: path.join(root, "daemon.pid"),
   };

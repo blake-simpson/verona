@@ -27,11 +27,12 @@
     "deploy/",
     "agents/examples/",
     "src/hooks/memory-guard.sh",
+    "src/hooks/connector-guard.sh",
     "LICENSE",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && mkdir -p dist/hooks && cp src/hooks/memory-guard.sh dist/hooks/memory-guard.sh && chmod +x dist/hooks/memory-guard.sh",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/hooks && cp src/hooks/memory-guard.sh dist/hooks/memory-guard.sh && cp src/hooks/connector-guard.sh dist/hooks/connector-guard.sh && chmod +x dist/hooks/memory-guard.sh dist/hooks/connector-guard.sh",
     "build:runtime": "tsx scripts/build.ts",
     "dev": "tsx src/cli/index.ts",
     "test": "vitest run",
@@ -42,6 +43,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.32.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@slack/socket-mode": "^2.0.2",
     "@slack/web-api": "^7.8.0",
     "commander": "^12.1.0",

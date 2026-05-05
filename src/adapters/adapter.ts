@@ -44,6 +44,24 @@ export interface AdapterRequest {
    * `claude -p --settings`. Required for claude-cli; ignored otherwise.
    */
   hookSettingsPath?: string;
+  /**
+   * Path to the per-task MCP config JSON, applied via `claude -p --mcp-config`.
+   * Set by the dispatcher when the agent has connector subscriptions and
+   * therefore gets capability tools. claude-cli only.
+   */
+  mcpConfigPath?: string;
+  /**
+   * Per-run scratch dir, e.g. <state>/runs/<runId>/. Added to the worker's
+   * --add-dir so Read can access inbound attachments and the agent can stage
+   * outbound files. claude-cli only.
+   */
+  runDir?: string;
+  /**
+   * Per-run connector-guard policy file. Read by hooks/connector-guard.sh
+   * via the VERONA_CONNECTOR_POLICY env var to gate `mcp__verona__*` calls
+   * by destination allowlist. claude-cli only.
+   */
+  connectorPolicyPath?: string;
   cancel: AbortSignal;
 }
 

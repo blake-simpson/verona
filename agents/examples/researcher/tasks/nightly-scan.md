@@ -19,9 +19,17 @@ Don't try to scan all of these — pick what's most likely to surface signal giv
 
 ## Output
 
-1. Print a Slack-ready digest: 1–3 projects, each with name, link, one-line capability, why-it-matters (≤2 lines).
-2. Append a structured fact to `memory/learned/facts/<topic-or-yyyy-mm>.md` for each project so future runs can dedupe.
-3. Write an episodic log to `memory/learned/episodic/<stamp>-nightly-scan-<runId>.md` listing what you scanned, what you rejected and why, and the final picks.
+1. If you have 1–3 high-signal findings, post a Slack digest by calling
+   `mcp__verona__slack__send_message` with `{ channel: "#research-feed", text: <digest> }`.
+   Each project gets name, link, one-line capability, and why-it-matters (≤2 lines).
+   The returned `ts` is the thread anchor — any user reply in that thread
+   resumes this session automatically (no @-mention required).
+2. If nothing clears the bar, **do not call `slack__send_message`**. Memory
+   write is enough — silence beats noise.
+3. Append a structured fact to `memory/learned/facts/<topic-or-yyyy-mm>.md`
+   for each project so future runs can dedupe.
+4. Write an episodic log to `memory/learned/episodic/<stamp>-nightly-scan-<runId>.md`
+   listing what you scanned, what you rejected and why, and the final picks.
 
 ## Don't
 
