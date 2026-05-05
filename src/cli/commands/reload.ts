@@ -1,7 +1,12 @@
 /**
- * `verona reload` — sends SIGHUP to the running daemon, asking it to
- * re-read agent configs, re-apply the schedule, and diff the user connector
- * registry (start/stop/restart based on manifest version).
+ * `verona reload` — sends SIGHUP to the running daemon. The daemon then:
+ *
+ *   1. Refreshes registered agents from ~/.verona/user/agents/<name>/ —
+ *      protected files (agent.toml, SOUL.md, tasks/, memory/core/) are
+ *      re-copied from source. Memory under learned/ is preserved.
+ *   2. Re-reads agent configs and re-applies the schedule.
+ *   3. Diffs the user connector registry: start/stop/restart based on
+ *      manifest version.
  *
  * Reads the pidfile at <state>/daemon.pid (written by `verona daemon` at
  * startup, removed at shutdown). Verifies the process exists with `kill -0`

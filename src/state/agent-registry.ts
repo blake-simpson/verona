@@ -133,6 +133,55 @@ export async function removeRegisteredAgent(stateDir: string, agentName: string)
   await rm(dir, { recursive: true, force: true });
 }
 
+export interface RefreshResult {
+  /** Agents whose source dir existed and was re-copied successfully. */
+  refreshed: string[];
+  /** Agents whose source dir at `<sourceRoot>/<name>/` was missing — left untouched. */
+  missing: string[];
+  /** Agents whose refresh threw — left in their previous state. */
+  errors: Array<{ name: string; message: string }>;
+}
+
+/**
+ * For every agent currently registered in `stateDir`, look for a source dir
+ * at `<sourceRoot>/<name>/` and, if present, re-run registerAgent to refresh
+ * the protected files (agent.toml, SOUL.md, tasks/, memory/core/). Memory
+ * under `learned/` is preserved by registerAgent's existing logic.
+ *
+ * Used by `Daemon.reload()` so a user editing
+ * `~/.verona/user/agents/<name>/agent.toml` followed by `verona reload`
+ * picks up the change without needing a separate `verona agents add`.
+ *
+ * Lenient by design: an agent whose source has moved or been deleted is
+ * skipped (not removed). The user can still re-register manually with
+ * `verona agents add <new-path>`.
+ */
+export async function refreshRegisteredAgents(
+  stateDir: string,
+  sourceRoot: string,
+): Promise<RefreshResult> {
+  const names = await listRegisteredAgents(stateDir);
+  const refreshed: string[] = [];
+  const missing: string[] = [];
+  const errors: Array<{ name: string; message: string }> = [];
+  for (const name of names) {
+    const sourceDir = path.join(sourceRoot, name);
+    const sourceToml = path.join(sourceDir, "agent.toml");
+    if (!(await fileExists(sourceToml))) {
+      missing.push(name);
+      continue;
+    }
+    try {
+      await registerAgent({ sourceDir, stateDir });
+      refreshed.push(name);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      errors.push({ name, message });
+    }
+  }
+  return { refreshed, missing, errors };
+}
+
 export async function listRegisteredAgents(stateDir: string): Promise<string[]> {
   const agentsRoot = path.join(stateDir, "agents");
   try {

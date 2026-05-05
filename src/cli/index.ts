@@ -159,7 +159,7 @@ export async function main(argv: string[] = process.argv): Promise<number> {
   program
     .command("reload")
     .description(
-      "signal a running daemon (SIGHUP) to re-read agent configs and diff the user-connector registry. Built-in connector tokens (slack) still require a full restart.",
+      "signal a running daemon (SIGHUP). Refreshes registered agents from ~/.verona/user/agents/<name>/, re-reads configs, and diffs the user-connector registry. Built-in connector tokens (slack) still require a full restart.",
     )
     .action(async () => {
       const result = await runReload({ stateDir: program.opts().stateDir });

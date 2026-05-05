@@ -20,8 +20,13 @@ import type { Connector, ConnectorContext, InboundEvent } from "../connectors/co
 import { SlackConnector } from "../connectors/slack/index.js";
 import { memoryGuardScriptPath } from "../hooks/locate.js";
 import { getSecret } from "../secrets/store.js";
-import { listRegisteredAgents } from "../state/agent-registry.js";
-import { agentDir as resolveAgentDir, resolveConnectorsDir, statePaths } from "../state/paths.js";
+import { listRegisteredAgents, refreshRegisteredAgents } from "../state/agent-registry.js";
+import {
+  agentDir as resolveAgentDir,
+  resolveAgentsDir,
+  resolveConnectorsDir,
+  statePaths,
+} from "../state/paths.js";
 import { ConfigError } from "../util/errors.js";
 import { AuditLog } from "./audit-log.js";
 import {
@@ -121,6 +126,20 @@ export class Daemon {
       throw new ConfigError("daemon.reload() called before bootstrap()");
     }
     process.stdout.write("verona daemon: reload requested; re-reading agents…\n");
+    // Refresh registered agents from their source dir before re-reading.
+    // This closes the silent two-tree drift where edits to
+    // ~/.verona/user/agents/<name>/agent.toml don't propagate to
+    // <state>/agents/<name>/ until the user runs `verona agents add`.
+    const sourceRoot = resolveAgentsDir();
+    const refresh = await refreshRegisteredAgents(this.stateDir, sourceRoot);
+    if (refresh.refreshed.length > 0) {
+      process.stdout.write(
+        `verona daemon: refreshed ${refresh.refreshed.length} agent(s) from ${sourceRoot}\n`,
+      );
+    }
+    for (const e of refresh.errors) {
+      process.stderr.write(`verona daemon: refresh ${e.name} failed — ${e.message}\n`);
+    }
     this.agents = await this.loadAgents();
     this.scheduler.setAgents(this.agents);
     await this.reloadUserConnectors();
