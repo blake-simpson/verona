@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.4
+
+**Released:** 2026-05-05
+
+### Changes since v0.2.3
+
+- fix: stop() only removes the pidfile the running daemon wrote
+
 ## v0.2.3
 
 **Released:** 2026-05-05
