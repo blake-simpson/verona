@@ -15,7 +15,7 @@ import { AnthropicApiAdapter } from "../adapters/anthropic-api.js";
 import { ClaudeCliAdapter } from "../adapters/claude-cli.js";
 import { OpenAICompatAdapter } from "../adapters/openai-compat.js";
 import { loadAgentConfig, loadVeronaConfig } from "../config/loader.js";
-import type { VeronaConfig } from "../config/schema.js";
+import type { AgentConfig, VeronaConfig } from "../config/schema.js";
 import type { Connector, ConnectorContext, InboundEvent } from "../connectors/connector.js";
 import { SlackConnector } from "../connectors/slack/index.js";
 import { memoryGuardScriptPath } from "../hooks/locate.js";
@@ -389,7 +389,7 @@ export class Daemon {
 
     const effort = task.effort ?? cfg.agent.default_effort;
 
-    await dispatch({
+    const result = await dispatch({
       agentDir: agentRoot,
       agentName: input.agentName,
       taskId: input.taskId,
@@ -404,6 +404,62 @@ export class Daemon {
       ...(input.userMessage !== undefined && { userMessage: input.userMessage }),
       ...(input.sessionId !== undefined && { sessionId: input.sessionId }),
     });
+
+    if (task.post_response) {
+      await this.postTaskResponse({
+        agentName: input.agentName,
+        connectorsCfg: cfg.connectors,
+        runId: result.runId,
+        text: result.response.text,
+      });
+    }
+  }
+
+  /**
+   * Post a cron/manual task's final assistant message to the agent's
+   * configured outbound connector. Only Slack today; routes via
+   * `[connectors] slack = { channel = "..." }`. Failures here are warnings,
+   * not errors — the task itself succeeded; we just couldn't ship the post.
+   */
+  private async postTaskResponse(input: {
+    agentName: string;
+    connectorsCfg: AgentConfig["connectors"];
+    runId: string;
+    text: string;
+  }): Promise<void> {
+    const slackCfg = input.connectorsCfg.slack as { channel?: string } | undefined;
+    const destination = slackCfg?.channel;
+    if (!destination) {
+      process.stderr.write(
+        `[daemon] ${input.agentName}: post_response set but no [connectors] slack.channel configured; skipping post\n`,
+      );
+      return;
+    }
+    const connector = this.connectors.get("slack");
+    if (!connector?.send) {
+      process.stderr.write(
+        `[daemon] ${input.agentName}: post_response set but slack connector is not running (tokens missing?); skipping post\n`,
+      );
+      return;
+    }
+    if (!input.text.trim()) {
+      process.stderr.write(
+        `[daemon] ${input.agentName}: post_response set but the agent's final message was empty; skipping post\n`,
+      );
+      return;
+    }
+    try {
+      await connector.send({
+        connectorId: "slack",
+        runId: input.runId,
+        agent: input.agentName,
+        destination,
+        text: input.text,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      process.stderr.write(`[daemon] ${input.agentName}: post_response failed — ${msg}\n`);
+    }
   }
 
   private async loadAgents(): Promise<AgentSchedule[]> {

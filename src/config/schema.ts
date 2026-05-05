@@ -50,6 +50,15 @@ export const TaskSchema = z
     allowed_tools: z.array(z.string()).optional(),
     schedule: z.string().optional(),
     on_message: z.boolean().optional(),
+    /**
+     * When true, the daemon posts the agent's final assistant message to the
+     * agent's configured outbound connector after a successful run. Currently
+     * routes via `[connectors] slack` (channel from that block). No-op if the
+     * agent has no slack config or the connector isn't running. Inbound
+     * (on_message) replies always post — this flag is for cron / manual runs
+     * where posting is opt-in.
+     */
+    post_response: z.boolean().optional(),
   })
   .refine(
     (t) => Boolean(t.schedule) || Boolean(t.on_message),
