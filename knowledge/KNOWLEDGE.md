@@ -20,6 +20,7 @@ See `meta/how-to-amend-knowledge.md` for amendment rules.
 | `architecture/connector-contract.md` | Add a connector (Slack, webhook, email, Discord, etc.) |
 | `architecture/memory-protocol.md` | Touch memory loading, the FS write boundary, or the PreToolUse hook |
 | `architecture/two-tree-deploy.md` | Change `verona build`, `verona deploy`, or the source/state tree split |
+| `architecture/user-content-sync.md` | Touch the laptop→server sync flow, `verona user *` commands, the polling job, refresh-on-reload, or the deploy-key pattern |
 | `architecture/claude-p-invocation.md` | Change how the claude-cli adapter shells out, edit hook settings, or debug a `claude -p` flag |
 
 ## Conventions

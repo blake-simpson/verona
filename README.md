@@ -113,7 +113,42 @@ $ verona connectors build quickbooks   # esbuild → dist/index.js
 $ verona user push                     # commits + pushes
 ```
 
-**On the server (one-time):**
+**On the server — set up the deploy key (one-time):**
+
+The server needs SSH access to your private repo. The cleanest pattern is a per-server, read-only deploy key:
+
+```bash
+# 1. Generate a passphrase-less ed25519 key for this server
+ssh-keygen -t ed25519 -C "$(hostname) verona-personal deploy key" \
+    -f ~/.ssh/verona-personal -N ""
+
+# 2. Pin it for github.com in your SSH config
+cat >> ~/.ssh/config <<'EOF'
+
+Host github.com
+  HostName github.com
+  User git
+  IdentityFile ~/.ssh/verona-personal
+  IdentitiesOnly yes
+EOF
+chmod 600 ~/.ssh/config ~/.ssh/verona-personal
+
+# 3. Print the public key — add this on GitHub
+cat ~/.ssh/verona-personal.pub
+```
+
+In GitHub: **Repo → Settings → Deploy keys → Add deploy key**. Title it after the host (e.g. `shakespeare`), paste the public key, **leave "Allow write access" unchecked** — sync only ever pulls.
+
+Test access:
+
+```bash
+ssh -T git@github.com
+# expected: "Hi <user>/verona-personal! You've successfully authenticated..."
+```
+
+The key is repo-scoped (not account-wide). If a server is ever compromised the blast radius is one private repo, revocable from the deploy keys page. No passphrase is required because the daemon polls unattended.
+
+**On the server — install + sync (one-time):**
 
 ```bash
 npm install -g verona-ai
@@ -159,12 +194,13 @@ You never SSH in for content changes. Backup is a `git push`.
 | `verona init` | <1s | always |
 | Install Claude Code plugin | 30s | optional |
 | Set up a private git remote | 1–2min (GitHub) | only for laptop+server |
+| Server deploy key (ssh-keygen + GitHub Settings → Deploy keys) | 2min | only for laptop+server, once per server |
 | `verona user init [--remote]` | <1s | always |
 | `verona connectors add <id>` per token | 30s each | once per token-bearing connector per machine |
 | `verona service install` | <1s | only for headless run |
 | Configure `[user_sync]` | 30s | only for laptop+server |
 
-Heaviest path = ~5 minutes total. Anyone who's set up a GitHub repo can do it.
+Heaviest path = ~7 minutes total. Anyone who's set up a GitHub repo can do it.
 
 ### What does NOT need a private repo
 

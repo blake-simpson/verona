@@ -2,11 +2,13 @@
 
 ## Why this matters
 
-If `git pull` or `verona deploy` could overwrite an agent's memory, no one would trust the framework to run unattended. The two-tree split — source repo here, runtime state somewhere else — is the structural answer. It also means worker agents at runtime don't see the dev-time `knowledge/` and `AGENTS.md` (a separate non-negotiable from the user).
+If `git pull` or `verona deploy` could overwrite an agent's memory, no one would trust the framework to run unattended. The deploy/state split — source repo here, runtime state somewhere else — is the structural answer. It also means worker agents at runtime don't see the dev-time `knowledge/` and `AGENTS.md` (a separate non-negotiable from the user).
+
+A separate concern lives in the user-content tree (`~/.verona/user/`, the user's private git repo of agents + connectors). That's documented in `architecture/user-content-sync.md`. This entry is about the deploy artifact vs. the state tree — the boundary that protects memory.
 
 ## Invariant
 
-There are exactly two trees:
+There are exactly two trees that the deploy boundary protects:
 
 **Source tree** (this repo):
 - `src/`, `agents/examples/`, `plugin/`, `marketplace.json`, `deploy/`, `tests/`, `scripts/`
@@ -19,7 +21,7 @@ There are exactly two trees:
 - Its own `.git` — memory writes auto-commit here.
 - Touched by the daemon at runtime; **never touched by deploys.**
 
-The deployed runtime artifact is a third, ephemeral tree (`/opt/verona/runtime/`) — a slim subset of the source tree, built by `verona build`. This is replaceable; the state tree above is not.
+The deployed runtime artifact is a third, ephemeral tree (`/opt/verona/runtime/`) — a slim subset of the source tree, built by `verona build`. This is replaceable; the state tree above is not. The user-content tree (`~/.verona/user/`) is a fourth concern but lives outside the deploy path entirely and is the user's authoring repo, not framework state — see `user-content-sync.md`.
 
 ## What `verona build` includes / excludes
 
@@ -66,3 +68,4 @@ The deployed runtime artifact is a third, ephemeral tree (`/opt/verona/runtime/`
 ## Revisions
 
 - 2026-05-02 — initial entry, two-tree contract codified.
+- 2026-05-05 — note the user-content tree introduced in v0.3.0; cross-link to `user-content-sync.md`. The deploy/state invariant is unchanged.
