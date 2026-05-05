@@ -74,15 +74,6 @@ export async function runUserInit(opts: UserInitOptions = {}): Promise<UserInitR
   if (!wasRepo) {
     await git.init();
     await ensureCommitIdentity(git);
-    // Force the initial branch to `main` regardless of git's
-    // `init.defaultBranch` setting. Sidesteps master/main mismatches when
-    // the GitHub remote defaults to main but the local git is older.
-    // `symbolic-ref` works before the first commit; non-fatal if it fails.
-    try {
-      await git.raw(["symbolic-ref", "HEAD", "refs/heads/main"]);
-    } catch {
-      /* leave whatever git's default produced */
-    }
   }
 
   const gitignorePath = path.join(userDir, ".gitignore");
