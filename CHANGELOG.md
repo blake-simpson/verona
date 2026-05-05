@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.2.2
+
+**Released:** 2026-05-05
+
+### Changes since v0.2.1
+
+- feat: pin claude binary path in rendered service units
+
 ## v0.2.1
 
 **Released:** 2026-05-04
