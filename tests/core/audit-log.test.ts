@@ -140,4 +140,37 @@ describe("AuditLog", () => {
     await log.append(adapterRecord());
     expect((await stat(nested)).isFile()).toBe(true);
   });
+
+  describe("drain()", () => {
+    it("awaits fire-and-forget appends so they reach disk", async () => {
+      const log = new AuditLog({ filePath: activeFile, rotatedDir });
+      // Simulate the daemon's `void this.auditLog.append(...)` pattern.
+      void log.append(adapterRecord({ runId: "FF1" }));
+      void log.append(adapterRecord({ runId: "FF2" }));
+      void log.append(adapterRecord({ runId: "FF3" }));
+      await log.drain();
+      const all = await log.readAll();
+      expect(all.map((r) => r.runId).sort()).toEqual(["FF1", "FF2", "FF3"]);
+    });
+
+    it("is a no-op when nothing is in flight", async () => {
+      const log = new AuditLog({ filePath: activeFile, rotatedDir });
+      await log.drain(); // should not throw, should not block
+      await log.append(adapterRecord({ runId: "AFTER" }));
+      await log.drain();
+      const all = await log.readAll();
+      expect(all.map((r) => r.runId)).toEqual(["AFTER"]);
+    });
+
+    it("never throws even if a pending append fails", async () => {
+      // Write to a path whose parent we'll forcibly remove right after starting
+      // — the append should error internally; drain() must still resolve.
+      const broken = path.join(dir, "will-be-removed", "audit.ndjson");
+      const log = new AuditLog({ filePath: broken, rotatedDir });
+      const p = log.append(adapterRecord({ runId: "X" }));
+      // Suppress the unhandled-rejection warning if the append errors:
+      p.catch(() => {});
+      await expect(log.drain()).resolves.toBeUndefined();
+    });
+  });
 });

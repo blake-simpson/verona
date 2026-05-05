@@ -487,6 +487,10 @@ export class Daemon {
     for (const c of this.connectors.values()) {
       if (c.stop) await c.stop();
     }
+    // Drain in-flight audit appends so CLI process.exit() doesn't drop
+    // records dispatched during this run (e.g. connector_send from a
+    // post_response slack post in `verona schedule run`).
+    await this.auditLog.drain();
     await this.removePidFile();
     this.removeSignalHandlers();
     this.onShutdown?.();

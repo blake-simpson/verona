@@ -75,6 +75,13 @@ export class AuditLog {
   private readonly filePath: string;
   private readonly rotatedDir: string;
   private readonly rotateAtBytes: number;
+  /**
+   * In-flight `append()` promises. Tracked so callers that fire-and-forget
+   * (`void log.append(...)`) can still be drained before process exit. Each
+   * entry self-evicts via the .finally() in `append()`, so this list stays
+   * proportional to current concurrency, not lifetime call count.
+   */
+  private readonly pending: Set<Promise<void>> = new Set();
 
   constructor(init: AuditLogInit) {
     this.filePath = init.filePath;
@@ -83,10 +90,30 @@ export class AuditLog {
   }
 
   async append(record: AuditRecord): Promise<void> {
+    const p = this.doAppend(record);
+    this.pending.add(p);
+    p.finally(() => this.pending.delete(p)).catch(() => {
+      /* swallow — caller awaiting `p` directly will see the error */
+    });
+    await p;
+  }
+
+  private async doAppend(record: AuditRecord): Promise<void> {
     await mkdir(path.dirname(this.filePath), { recursive: true });
     await this.maybeRotate();
     const line = `${JSON.stringify(record)}\n`;
     await appendFile(this.filePath, line, "utf8");
+  }
+
+  /**
+   * Await every in-flight append(), including fire-and-forget ones from
+   * `void log.append(...)` callers. Used by Daemon.stop() so the CLI's
+   * `process.exit()` doesn't drop records that were dispatched but not
+   * yet flushed to disk. Always resolves; never throws.
+   */
+  async drain(): Promise<void> {
+    if (this.pending.size === 0) return;
+    await Promise.allSettled(this.pending);
   }
 
   /**
