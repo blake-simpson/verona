@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.3.0
+
+**Released:** 2026-05-05
+
+### Changes since v0.2.4
+
+- chore: add scripts/dev-smoke.sh for the local-edit / remote-run flow
+- feat: verona reload auto-refreshes registered agents from source
+- fix: drain in-flight audit appends in Daemon.stop()
+- feat: user-authored connectors + ~/.verona/user/ git repo + auto-sync
+
 ## v0.2.4
 
 **Released:** 2026-05-05
