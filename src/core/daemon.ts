@@ -43,6 +43,13 @@ export class Daemon {
   private sessionStore: SessionStore;
   private connectors: Map<string, Connector> = new Map();
   private agents: AgentSchedule[] = [];
+  /**
+   * Set in `writePidFile()` so `removePidFile()` only unlinks the file it
+   * wrote. Without this, the ephemeral Daemon instances built by
+   * `verona schedule list/next/run` would call stop() and delete the
+   * long-running daemon's pidfile, breaking subsequent `verona reload`.
+   */
+  private wrotePidFile = false;
 
   constructor(init: DaemonInit) {
     this.stateDir = init.stateDir;
@@ -346,9 +353,11 @@ export class Daemon {
   private async writePidFile(): Promise<void> {
     const file = statePaths(this.stateDir).daemonPid;
     await writeFile(file, `${process.pid}\n`, "utf8");
+    this.wrotePidFile = true;
   }
 
   private async removePidFile(): Promise<void> {
+    if (!this.wrotePidFile) return;
     const file = statePaths(this.stateDir).daemonPid;
     try {
       await rm(file, { force: true });

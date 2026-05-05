@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -81,5 +82,20 @@ describe("Daemon", () => {
       }),
     ).rejects.toBeInstanceOf(ConfigError);
     await daemon.stop();
+  });
+
+  it("stop() does not delete a pidfile this Daemon instance never wrote", async () => {
+    // Simulates the bug: `verona schedule run` builds an ephemeral Daemon
+    // that calls bootstrap+runTask+stop but never run() (so never writes a
+    // pidfile). The long-running daemon's pidfile must survive.
+    const pidFile = path.join(stateDir, "daemon.pid");
+    await writeFile(pidFile, "5568\n", "utf8");
+
+    const daemon = new Daemon({ stateDir });
+    await daemon.bootstrap();
+    await daemon.stop();
+
+    expect(existsSync(pidFile)).toBe(true);
+    expect((await readFile(pidFile, "utf8")).trim()).toBe("5568");
   });
 });
