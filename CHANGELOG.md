@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.1
+
+**Released:** 2026-05-12
+
+### Changes since v0.4.0
+
+- feat: agent skills declared in agent.toml, staged per spawn
+
 ## v0.4.0
 
 **Released:** 2026-05-05
