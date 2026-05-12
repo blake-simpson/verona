@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.2
+
+**Released:** 2026-05-12
+
+### Changes since v0.4.1
+
+- fix: stage skills in agentDir so claude -p session resume keeps working
+
 ## v0.4.1
 
 **Released:** 2026-05-12
