@@ -31,6 +31,7 @@ import type { AdapterInvocationRecord, AuditLog } from "./audit-log.js";
 import { loadMemory } from "./memory-loader.js";
 import { writeEpisodicLog } from "./memory-writer.js";
 import type { SessionStore } from "./session-store.js";
+import { stageSkills } from "./skill-loader.js";
 
 export interface DispatchTrigger {
   kind: "manual" | "cron" | "message";
@@ -124,6 +125,18 @@ export interface DispatchInput {
    * (agent, threadKey) → response.sessionId entries.
    */
   sessionStore?: SessionStore;
+  /**
+   * Names of skills declared in agent.toml's [agent].skills. When non-empty,
+   * the dispatcher creates a runDir, symlinks each skill into
+   * `<runDir>/.claude/skills/<name>`, and sets the adapter's cwd to runDir so
+   * `claude -p` discovers them as project-local skills.
+   */
+  skills?: readonly string[];
+  /**
+   * Canonical skills root, e.g. `~/.verona/user/skills/`. Required when
+   * `skills` is non-empty. The daemon resolves this via `resolveSkillsDir()`.
+   */
+  skillsDir?: string;
 }
 
 export interface DispatchResult {
@@ -147,10 +160,13 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
   const runId = input.runId ?? ulid();
   const startedAt = new Date();
 
+  const skills = input.skills ?? [];
+
   const memory = await loadMemory({
     agentDir: input.agentDir,
     agentName: input.agentName,
     taskId: input.taskId,
+    skills,
   });
 
   const userPrompt = await composeUserPrompt({
@@ -179,18 +195,28 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
   // If the agent has connector subscriptions, render a per-run MCP config so
   // the agent can invoke `mcp__verona__<connector>__<capability>` tools.
   // Otherwise the spawn behaves like before — no MCP server, no tool plane.
+  // A runDir is also created when skills are declared, so they can be
+  // symlinked into <runDir>/.claude/skills/ for `claude -p` to discover.
   let mcpConfigPath: string | undefined;
   let runDir: string | undefined;
   let connectorPolicyPath: string | undefined;
   const hasSubs = (input.subscriptions?.length ?? 0) > 0;
-  if (hasSubs) {
-    if (!input.runsDir || !input.auditLogPath || !input.stateDir) {
+  const hasSkills = skills.length > 0;
+  if (hasSubs || hasSkills) {
+    if (!input.runsDir) {
       throw new ConfigError(
-        "dispatch: subscriptions require runsDir + auditLogPath + stateDir (daemon should provide them)",
+        "dispatch: runDir required for subscriptions or skills (daemon should provide runsDir)",
       );
     }
     runDir = path.join(input.runsDir, runId);
     await mkdir(runDir, { recursive: true });
+  }
+  if (hasSubs) {
+    if (!input.auditLogPath || !input.stateDir || !runDir) {
+      throw new ConfigError(
+        "dispatch: subscriptions require auditLogPath + stateDir (daemon should provide them)",
+      );
+    }
     mcpConfigPath = path.join(runDir, "mcp-config.json");
     await renderSpawnConfig({
       outputPath: mcpConfigPath,
@@ -211,6 +237,15 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
       outputPath: connectorPolicyPath,
       policy: buildConnectorPolicy(input.subscriptions ?? []),
     });
+  }
+
+  if (hasSkills) {
+    if (!input.skillsDir || !runDir) {
+      throw new ConfigError(
+        "dispatch: skills require skillsDir (daemon should provide resolveSkillsDir())",
+      );
+    }
+    await stageSkills({ skills, skillsDir: input.skillsDir, runDir });
   }
 
   // Extend allowedTools so the agent can call its MCP-exposed verona tools.
@@ -234,6 +269,9 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
     ...(mcpConfigPath !== undefined && { mcpConfigPath }),
     ...(runDir !== undefined && { runDir }),
     ...(connectorPolicyPath !== undefined && { connectorPolicyPath }),
+    // When skills are staged, set cwd so `claude -p` discovers
+    // <runDir>/.claude/skills/ as project-local. No-op when runDir is unset.
+    ...(hasSkills && runDir !== undefined && { cwd: runDir }),
   };
 
   let response: AdapterResponse;

@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, readlink, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -101,6 +101,56 @@ describe("dispatch", () => {
 
     expect(adapter.lastRequest?.userPrompt).toContain("Run a scan and report.");
     expect(adapter.lastRequest?.userPrompt).toContain("dive deeper on project 2");
+  });
+
+  it("stages declared skills and sets cwd so claude -p discovers them", async () => {
+    const adapter = new StubAdapter({
+      text: "ok",
+      tokens: { input: 1, output: 1 },
+      costUsd: null,
+      subscriptionCovered: true,
+      modelUsed: "claude-sonnet-4-6",
+      toolCalls: 0,
+      durationMs: 1,
+    });
+
+    const runsDir = await mkdtemp(path.join(tmpdir(), "verona-runs-"));
+    const skillsDir = await mkdtemp(path.join(tmpdir(), "verona-skillsroot-"));
+    const skillSrc = path.join(skillsDir, "copywriting");
+    await mkdir(skillSrc, { recursive: true });
+    await writeFile(path.join(skillSrc, "SKILL.md"), "# copywriting", "utf8");
+
+    try {
+      await dispatch({
+        agentDir,
+        agentName: "tester",
+        taskId: "scan",
+        promptPath: "./tasks/scan.md",
+        effort: "medium",
+        trigger: { kind: "manual" },
+        adapter,
+        guardScriptPath: GUARD,
+        runsDir,
+        skills: ["copywriting"],
+        skillsDir,
+      });
+
+      const req = adapter.lastRequest!;
+      expect(req.cwd).toBeDefined();
+      expect(req.cwd).toBe(req.runDir);
+
+      const staged = path.join(req.cwd!, ".claude", "skills", "copywriting");
+      const st = await stat(staged);
+      expect(st.isDirectory()).toBe(true);
+      expect(await readlink(staged)).toBe(skillSrc);
+
+      // Framing block lists the declared skills so the model knows they exist.
+      expect(req.systemPrompt).toContain("Available skills");
+      expect(req.systemPrompt).toContain("copywriting");
+    } finally {
+      await rm(runsDir, { recursive: true, force: true });
+      await rm(skillsDir, { recursive: true, force: true });
+    }
   });
 
   it("propagates sessionId for resume", async () => {

@@ -4,7 +4,7 @@
 
 If `git pull` or `verona deploy` could overwrite an agent's memory, no one would trust the framework to run unattended. The deploy/state split — source repo here, runtime state somewhere else — is the structural answer. It also means worker agents at runtime don't see the dev-time `knowledge/` and `AGENTS.md` (a separate non-negotiable from the user).
 
-A separate concern lives in the user-content tree (`~/.verona/user/`, the user's private git repo of agents + connectors). That's documented in `architecture/user-content-sync.md`. This entry is about the deploy artifact vs. the state tree — the boundary that protects memory.
+A separate concern lives in the user-content tree (`~/.verona/user/`, the user's private git repo of agents, connectors, and skills). That's documented in `architecture/user-content-sync.md`. This entry is about the deploy artifact vs. the state tree — the boundary that protects memory.
 
 ## Invariant
 
@@ -69,3 +69,4 @@ The deployed runtime artifact is a third, ephemeral tree (`/opt/verona/runtime/`
 
 - 2026-05-02 — initial entry, two-tree contract codified.
 - 2026-05-05 — note the user-content tree introduced in v0.3.0; cross-link to `user-content-sync.md`. The deploy/state invariant is unchanged.
+- 2026-05-12 — user-content tree now also holds `skills/` (see `architecture/skills.md`); deploy/state invariant still unchanged.

@@ -22,6 +22,7 @@ See `meta/how-to-amend-knowledge.md` for amendment rules.
 | `architecture/two-tree-deploy.md` | Change `verona build`, `verona deploy`, or the source/state tree split |
 | `architecture/user-content-sync.md` | Touch the laptop→server sync flow, `verona user *` commands, the polling job, refresh-on-reload, or the deploy-key pattern |
 | `architecture/claude-p-invocation.md` | Change how the claude-cli adapter shells out, edit hook settings, or debug a `claude -p` flag |
+| `architecture/skills.md` | Touch the skills mechanism — declaration in agent.toml, the per-spawn symlink staging, or the cwd-based discovery in claude-cli |
 
 ## Conventions
 

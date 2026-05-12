@@ -4,7 +4,7 @@
 
 The npm-installed CLI is the same on every host, but the agents and connectors a user writes are personal. Editing `~/.verona/state/agents/<name>/agent.toml` directly works for one machine, but it makes "edit on laptop, run on server" a pain — there's no shared source-of-truth, no backup, no version history, and a forgotten `verona agents add` after an edit is a silent failure that wastes a debugging session.
 
-The user-content tree fixes this: one git repo at `~/.verona/user/`, with `agents/` and `connectors/` subdirs. The user authors here. The daemon refreshes the state tree from here on `verona reload`. A scheduled job inside the daemon polls a private remote for changes and reloads automatically.
+The user-content tree fixes this: one git repo at `~/.verona/user/`, with `agents/`, `connectors/`, and `skills/` subdirs. The user authors here. The daemon refreshes the state tree from here on `verona reload`. A scheduled job inside the daemon polls a private remote for changes and reloads automatically.
 
 ## Invariant
 
@@ -14,6 +14,7 @@ There is exactly one user-content tree per host:
 - `.git/` — the user's authored content, normally with a private remote.
 - `agents/<name>/` — one dir per agent (SOUL.md, agent.toml, tasks/, memory/core/, memory/INDEX.md). Override the leaf via `VERONA_AGENTS_DIR`.
 - `connectors/<id>/` — one dir per user connector (connector.toml, src/, dist/). Override via `VERONA_CONNECTORS_DIR`.
+- `skills/<name>/` — one dir per skill (SKILL.md + optional references/, evals/). Override via `VERONA_SKILLS_DIR`. Loaded at spawn time, not at daemon startup — no reload needed when a skill file changes (only when an agent's declared skill list changes).
 - Never holds secrets. Tokens live per-machine in `state/secrets/_connectors/<id>/`.
 
 The state tree (`~/.verona/state/`) is still the daemon's runtime authority — that's where memory writes land. The user-content tree is a *source* the daemon copies *from* into the state tree. The two trees are git-tracked independently: state for the audit trail, user-content for the user's authoring history.
@@ -73,3 +74,4 @@ A leaked key on a compromised server only grants pull access to one private repo
 ## Revisions
 
 - 2026-05-05 — initial entry. User-content tree, refresh-on-reload, opt-in polling sync, deploy-key pattern.
+- 2026-05-12 — user-content tree gains a `skills/` subdir; loaded per-spawn rather than at daemon startup. See `architecture/skills.md`.

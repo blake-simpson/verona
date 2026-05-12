@@ -87,7 +87,7 @@ export class ClaudeCliAdapter implements AIAdapter {
     const env = scrubEnv(process.env, req.workingDir, req.connectorPolicyPath);
 
     const startedAt = Date.now();
-    const result = await spawnClaude(args, env, req.cancel);
+    const result = await spawnClaude(args, env, req.cancel, req.cwd);
     const durationMs = Date.now() - startedAt;
 
     const finalEvent = result.events.find(isResultEvent);
@@ -190,10 +190,15 @@ function spawnClaude(
   args: string[],
   env: NodeJS.ProcessEnv,
   signal: AbortSignal,
+  cwd?: string,
 ): Promise<SpawnResult> {
   const bin = claudeBin();
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(bin, args, {
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      ...(cwd !== undefined && { cwd }),
+    });
     const events: SpawnResult["events"] = [];
     let stderrBuf = "";
     let stdoutBuf = "";

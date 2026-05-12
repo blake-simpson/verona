@@ -114,6 +114,23 @@ export function userConnectorDir(connectorsDir: string, id: string): string {
 }
 
 /**
+ * Resolves the user-skills dir. Default: <user>/skills/. Override via
+ * VERONA_SKILLS_DIR. Each subdirectory is one skill, containing at minimum
+ * `SKILL.md` (and optionally `references/`, `evals/`, etc.). The dispatcher
+ * symlinks declared skills into the per-run dir so `claude -p` picks them up
+ * via its native project-skill discovery.
+ */
+export function resolveSkillsDir(override?: string): string {
+  if (override) return path.resolve(override);
+  if (process.env.VERONA_SKILLS_DIR) return path.resolve(process.env.VERONA_SKILLS_DIR);
+  return path.join(resolveUserDir(), "skills");
+}
+
+export function userSkillDir(skillsDir: string, name: string): string {
+  return path.join(skillsDir, name);
+}
+
+/**
  * Legacy ~/.verona/agents/ location used before v0.3. Surfaced for the
  * doctor check that warns users with content there to migrate.
  */

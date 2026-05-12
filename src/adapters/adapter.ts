@@ -62,6 +62,13 @@ export interface AdapterRequest {
    * by destination allowlist. claude-cli only.
    */
   connectorPolicyPath?: string;
+  /**
+   * Working directory for the subprocess. Set by the dispatcher when the
+   * agent has declared skills, so `claude -p` treats `<cwd>/.claude/skills/`
+   * as project-local and auto-discovers the staged skills. When omitted the
+   * adapter inherits the daemon's CWD.
+   */
+  cwd?: string;
   cancel: AbortSignal;
 }
 

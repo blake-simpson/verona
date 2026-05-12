@@ -1,7 +1,8 @@
 /**
  * `verona user {init,push,pull,status}` — manage the user content git repo at
- * ~/.verona/user/. One repo holds two subdirs: `agents/` (your agent
- * definitions) and `connectors/` (your authored connectors).
+ * ~/.verona/user/. One repo holds three subdirs: `agents/` (your agent
+ * definitions), `connectors/` (your authored connectors), and `skills/`
+ * (shared SKILL.md modules agents call via the Skill tool).
  *
  *   init   — `git init`, scaffold subdirs, write a sane .gitignore. Optional
  *            `--remote <url>` adds an origin so you can `verona user push`.
@@ -22,7 +23,7 @@ import { runReload } from "./reload.js";
 
 const DEFAULT_GITIGNORE = [
   "# Verona user content gitignore",
-  "# Authored agents and connectors are committed; build/runtime artefacts are not.",
+  "# Authored agents, connectors, and skills are committed; build/runtime artefacts are not.",
   "",
   "node_modules/",
   ".DS_Store",
@@ -37,13 +38,18 @@ const DEFAULT_GITIGNORE = [
 const DEFAULT_README = [
   "# Verona — user content",
   "",
-  "This repo holds your authored agents and connectors. Verona's daemon",
-  "reads from here at startup and on `verona reload`.",
+  "This repo holds your authored agents, connectors, and skills. Verona's",
+  "daemon reads from here at startup and on `verona reload`.",
   "",
   "Layout:",
   "",
   "    agents/<name>/      one directory per agent (SOUL.md, agent.toml, tasks/)",
   "    connectors/<id>/    one directory per connector (connector.toml, src/, dist/)",
+  "    skills/<name>/      one directory per skill (SKILL.md + optional references/, evals/)",
+  "",
+  "Skills are shared across agents — declare them in `agent.toml` under",
+  "`[agent].skills` and the daemon symlinks them into the worker's per-run dir",
+  "so `claude -p` discovers them as project-local skills.",
   "",
   "Secrets are NOT stored here — they live per-machine in `~/.verona/state/secrets/`,",
   "captured via `verona connectors add <id>`.",
@@ -68,6 +74,7 @@ export async function runUserInit(opts: UserInitOptions = {}): Promise<UserInitR
   await mkdir(userDir, { recursive: true });
   await mkdir(path.join(userDir, "agents"), { recursive: true });
   await mkdir(path.join(userDir, "connectors"), { recursive: true });
+  await mkdir(path.join(userDir, "skills"), { recursive: true });
 
   const git = simpleGit(userDir);
   const wasRepo = await isGitRepo(userDir);

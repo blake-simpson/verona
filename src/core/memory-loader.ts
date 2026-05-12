@@ -23,6 +23,12 @@ export interface MemoryLoadInput {
   soulPath?: string;
   /** Path relative to agentDir (defaults to ./memory/INDEX.md). */
   indexPath?: string;
+  /**
+   * Names of skills available to the agent this spawn. Surfaced in the
+   * framing block so the model knows to reach for the Skill tool when
+   * relevant. The dispatcher stages the actual skill files separately.
+   */
+  skills?: readonly string[];
 }
 
 export interface MemoryLoadResult {
@@ -39,8 +45,13 @@ export interface MemoryLoadResult {
 const SOUL_DEFAULT = "./SOUL.md";
 const INDEX_DEFAULT = "./memory/INDEX.md";
 
-const FRAMING = (agentName: string, taskId: string, agentDir: string) =>
-  [
+const FRAMING = (
+  agentName: string,
+  taskId: string,
+  agentDir: string,
+  skills: readonly string[],
+) => {
+  const lines = [
     `You are agent "${agentName}", running task "${taskId}".`,
     "",
     `Your memory lives at: ${agentDir}/memory/`,
@@ -54,10 +65,20 @@ const FRAMING = (agentName: string, taskId: string, agentDir: string) =>
     "    Writes elsewhere (SOUL.md, agent.toml, tasks/, memory/core/) will be rejected by the host.",
     " 3. Append a per-run log to memory/learned/episodic/ describing what you did.",
     " 4. Keep INDEX.md under 200 lines; keep individual learned/facts/*.md under 100 lines.",
+  ];
+  if (skills.length > 0) {
+    lines.push(
+      "",
+      `Available skills (call via the Skill tool when relevant): ${skills.join(", ")}.`,
+    );
+  }
+  lines.push(
     "",
     "Below this line is your INDEX.md for the current memory state.",
     "═══════════════════════════════════════════════════════════════════════",
-  ].join("\n");
+  );
+  return lines.join("\n");
+};
 
 export async function loadMemory(input: MemoryLoadInput): Promise<MemoryLoadResult> {
   const soulPath = path.resolve(input.agentDir, input.soulPath ?? SOUL_DEFAULT);
@@ -68,7 +89,7 @@ export async function loadMemory(input: MemoryLoadInput): Promise<MemoryLoadResu
     readOptional(indexPath, `memory/INDEX.md is required at ${indexPath}`),
   ]);
 
-  const framing = FRAMING(input.agentName, input.taskId, input.agentDir);
+  const framing = FRAMING(input.agentName, input.taskId, input.agentDir, input.skills ?? []);
   const systemPrompt = [soul, framing, index].join("\n\n");
 
   return {

@@ -26,12 +26,13 @@ afterEach(async () => {
 });
 
 describe("verona user init", () => {
-  it("creates the user dir, agents/ and connectors/ subdirs, and a git repo", async () => {
+  it("creates the user dir, agents/ connectors/ skills/ subdirs, and a git repo", async () => {
     const result = await runUserInit({ userDir });
     expect(result.initialized).toBe(true);
     expect(result.userDir).toBe(userDir);
     await stat(path.join(userDir, "agents"));
     await stat(path.join(userDir, "connectors"));
+    await stat(path.join(userDir, "skills"));
     await stat(path.join(userDir, ".git"));
     const gi = await readFile(path.join(userDir, ".gitignore"), "utf8");
     expect(gi).toContain("node_modules/");

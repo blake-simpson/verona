@@ -56,12 +56,25 @@ export const TaskSchema = z
     "task must declare at least one trigger: schedule, on_message, or both",
   );
 
+const SkillNameSchema = z
+  .string()
+  .min(1)
+  .max(64)
+  .regex(/^[a-z][a-z0-9-]*$/, "must be kebab-case starting with a letter");
+
 export const AgentConfigSchema = z.object({
   agent: z.object({
     name: AgentNameSchema,
     description: z.string().optional(),
     adapter: AdapterIdSchema.default("claude-cli"),
     default_effort: EffortSchema.default("medium"),
+    /**
+     * Names of skills the agent should have access to at runtime. Each is
+     * resolved to `<user>/skills/<name>/SKILL.md`; the dispatcher symlinks
+     * declared skills into the per-run dir so `claude -p` picks them up via
+     * its native project-skill discovery.
+     */
+    skills: z.array(SkillNameSchema).default([]),
   }),
   soul: z
     .object({

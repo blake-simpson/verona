@@ -27,6 +27,7 @@ import {
   agentDir as resolveAgentDir,
   resolveAgentsDir,
   resolveConnectorsDir,
+  resolveSkillsDir,
   statePaths,
 } from "../state/paths.js";
 import { ConfigError } from "../util/errors.js";
@@ -547,6 +548,7 @@ export class Daemon {
       defaultChannel: (agent.config.connectors.slack as { channel?: string } | undefined)?.channel,
     });
 
+    const agentSkills = agent.config.agent.skills;
     const result = await dispatch({
       agentDir: agent.agentDir,
       agentName,
@@ -564,6 +566,10 @@ export class Daemon {
       runId,
       userMessage,
       ...(subscriptions.length > 0 && { subscriptions }),
+      ...(agentSkills.length > 0 && {
+        skills: agentSkills,
+        skillsDir: resolveSkillsDir(),
+      }),
       ...(onMsgTask?.prompt !== undefined && { promptPath: onMsgTask.prompt }),
       ...(sessionId !== null && { sessionId }),
       ...(budgetUsd !== undefined && { budgetUsd }),
@@ -743,6 +749,7 @@ export class Daemon {
     });
     const paths = statePaths(this.stateDir);
 
+    const agentSkills = cfg.agent.skills;
     await dispatch({
       agentDir: agentRoot,
       agentName: input.agentName,
@@ -759,6 +766,10 @@ export class Daemon {
       auditLogPath: paths.invocations,
       stateDir: paths.root,
       ...(subscriptions.length > 0 && { subscriptions }),
+      ...(agentSkills.length > 0 && {
+        skills: agentSkills,
+        skillsDir: resolveSkillsDir(),
+      }),
       ...(task.budget_usd !== undefined && { budgetUsd: task.budget_usd }),
       ...(task.allowed_tools && { allowedTools: task.allowed_tools }),
       ...(input.userMessage !== undefined && { userMessage: input.userMessage }),

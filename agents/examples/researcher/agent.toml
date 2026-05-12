@@ -3,6 +3,11 @@ name = "researcher"
 description = "Scans the web nightly for trends in AI coding tools, posts a digest to Slack, and answers follow-ups in thread."
 adapter = "claude-cli"
 default_effort = "medium"
+# Skills the agent can call via the Skill tool at runtime. Each name must
+# match a directory at `~/.verona/user/skills/<name>/` containing a SKILL.md.
+# Verona stages declared skills into the per-run dir so `claude -p` discovers
+# them as project-local. Remove this line if you have no skills.
+# skills = ["copywriting"]
 
 [soul]
 file = "./SOUL.md"
