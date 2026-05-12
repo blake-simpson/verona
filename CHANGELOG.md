@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.3
+
+**Released:** 2026-05-12
+
+### Changes since v0.4.2
+
+- fix: daemon survives adapter errors; auto-recover stale session anchors
+
 ## v0.4.2
 
 **Released:** 2026-05-12
