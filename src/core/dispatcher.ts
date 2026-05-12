@@ -195,28 +195,19 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
   // If the agent has connector subscriptions, render a per-run MCP config so
   // the agent can invoke `mcp__verona__<connector>__<capability>` tools.
   // Otherwise the spawn behaves like before — no MCP server, no tool plane.
-  // A runDir is also created when skills are declared, so they can be
-  // symlinked into <runDir>/.claude/skills/ for `claude -p` to discover.
   let mcpConfigPath: string | undefined;
   let runDir: string | undefined;
   let connectorPolicyPath: string | undefined;
   const hasSubs = (input.subscriptions?.length ?? 0) > 0;
   const hasSkills = skills.length > 0;
-  if (hasSubs || hasSkills) {
-    if (!input.runsDir) {
+  if (hasSubs) {
+    if (!input.runsDir || !input.auditLogPath || !input.stateDir) {
       throw new ConfigError(
-        "dispatch: runDir required for subscriptions or skills (daemon should provide runsDir)",
+        "dispatch: subscriptions require runsDir + auditLogPath + stateDir (daemon should provide them)",
       );
     }
     runDir = path.join(input.runsDir, runId);
     await mkdir(runDir, { recursive: true });
-  }
-  if (hasSubs) {
-    if (!input.auditLogPath || !input.stateDir || !runDir) {
-      throw new ConfigError(
-        "dispatch: subscriptions require auditLogPath + stateDir (daemon should provide them)",
-      );
-    }
     mcpConfigPath = path.join(runDir, "mcp-config.json");
     await renderSpawnConfig({
       outputPath: mcpConfigPath,
@@ -240,12 +231,15 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
   }
 
   if (hasSkills) {
-    if (!input.skillsDir || !runDir) {
+    if (!input.skillsDir) {
       throw new ConfigError(
         "dispatch: skills require skillsDir (daemon should provide resolveSkillsDir())",
       );
     }
-    await stageSkills({ skills, skillsDir: input.skillsDir, runDir });
+    // Stage in the agent's state dir so the CWD is stable across runs.
+    // `claude -p` keys session history on CWD; a per-spawn CWD would break
+    // --resume for Slack thread replies (and other anchored sessions).
+    await stageSkills({ skills, skillsDir: input.skillsDir, agentDir: input.agentDir });
   }
 
   // Extend allowedTools so the agent can call its MCP-exposed verona tools.
@@ -269,9 +263,10 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
     ...(mcpConfigPath !== undefined && { mcpConfigPath }),
     ...(runDir !== undefined && { runDir }),
     ...(connectorPolicyPath !== undefined && { connectorPolicyPath }),
-    // When skills are staged, set cwd so `claude -p` discovers
-    // <runDir>/.claude/skills/ as project-local. No-op when runDir is unset.
-    ...(hasSkills && runDir !== undefined && { cwd: runDir }),
+    // When skills are staged, set CWD to the agent's state dir so
+    // `claude -p` discovers <agentDir>/.claude/skills/ as project-local AND
+    // resumes per-agent session history correctly across runs.
+    ...(hasSkills && { cwd: input.agentDir }),
   };
 
   let response: AdapterResponse;

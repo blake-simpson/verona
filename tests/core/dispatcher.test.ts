@@ -103,7 +103,7 @@ describe("dispatch", () => {
     expect(adapter.lastRequest?.userPrompt).toContain("dive deeper on project 2");
   });
 
-  it("stages declared skills and sets cwd so claude -p discovers them", async () => {
+  it("stages declared skills in the agent dir and sets cwd=agentDir for stable session keying", async () => {
     const adapter = new StubAdapter({
       text: "ok",
       tokens: { input: 1, output: 1 },
@@ -114,7 +114,6 @@ describe("dispatch", () => {
       durationMs: 1,
     });
 
-    const runsDir = await mkdtemp(path.join(tmpdir(), "verona-runs-"));
     const skillsDir = await mkdtemp(path.join(tmpdir(), "verona-skillsroot-"));
     const skillSrc = path.join(skillsDir, "copywriting");
     await mkdir(skillSrc, { recursive: true });
@@ -130,16 +129,18 @@ describe("dispatch", () => {
         trigger: { kind: "manual" },
         adapter,
         guardScriptPath: GUARD,
-        runsDir,
         skills: ["copywriting"],
         skillsDir,
       });
 
       const req = adapter.lastRequest!;
-      expect(req.cwd).toBeDefined();
-      expect(req.cwd).toBe(req.runDir);
+      // CWD must be the stable per-agent dir, NOT runDir — `claude -p` keys
+      // session history on CWD, and per-spawn CWD breaks --resume for
+      // anchored Slack threads.
+      expect(req.cwd).toBe(agentDir);
+      expect(req.runDir).toBeUndefined();
 
-      const staged = path.join(req.cwd!, ".claude", "skills", "copywriting");
+      const staged = path.join(agentDir, ".claude", "skills", "copywriting");
       const st = await stat(staged);
       expect(st.isDirectory()).toBe(true);
       expect(await readlink(staged)).toBe(skillSrc);
@@ -148,7 +149,6 @@ describe("dispatch", () => {
       expect(req.systemPrompt).toContain("Available skills");
       expect(req.systemPrompt).toContain("copywriting");
     } finally {
-      await rm(runsDir, { recursive: true, force: true });
       await rm(skillsDir, { recursive: true, force: true });
     }
   });

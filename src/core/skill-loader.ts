@@ -1,20 +1,22 @@
 /**
- * Skill loader — stages declared skills into a per-run dir so `claude -p`
- * discovers them via its native project-skill mechanism.
+ * Skill loader — stages declared skills into the agent's state dir so
+ * `claude -p` discovers them via its native project-skill mechanism.
  *
- *   ~/.verona/user/skills/<name>/SKILL.md       (canonical, global pool)
+ *   ~/.verona/user/skills/<name>/SKILL.md         (canonical, global pool)
  *      ↓ symlink per declared name
- *   <runDir>/.claude/skills/<name>              (per-spawn, lifetime = the run)
+ *   <agentDir>/.claude/skills/<name>              (stable per-agent location)
  *
- * The adapter passes `<runDir>` as the subprocess CWD so Claude Code picks up
- * `<runDir>/.claude/skills/*` as project-local skills (descriptions surface
- * in the worker's available-skills list; the agent invokes via the Skill
- * tool when relevant).
+ * The adapter passes `<agentDir>` as the subprocess CWD so Claude Code picks
+ * up `<agentDir>/.claude/skills/*` as project-local skills. The CWD must be
+ * **stable per agent** — `claude -p` keys session history on CWD and would
+ * otherwise refuse `--resume <id>` when an inbound Slack reply lands.
  *
  * Skills are read-only context: no per-agent copies, no edits at runtime.
+ * Staging is idempotent and clears stale links so removing a skill from
+ * agent.toml takes effect on the next spawn.
  */
 
-import { mkdir, stat, symlink, unlink } from "node:fs/promises";
+import { mkdir, readdir, stat, symlink, unlink } from "node:fs/promises";
 import path from "node:path";
 import { ConfigError } from "../util/errors.js";
 
@@ -22,8 +24,8 @@ export interface StageSkillsInput {
   skills: readonly string[];
   /** Canonical skills root, e.g. `~/.verona/user/skills/`. */
   skillsDir: string;
-  /** Per-run dir, e.g. `<state>/runs/<runId>/`. The function creates `.claude/skills/` inside it. */
-  runDir: string;
+  /** Agent's state dir, e.g. `<state>/agents/<name>/`. The function creates `.claude/skills/` inside it and used as the subprocess CWD. */
+  agentDir: string;
 }
 
 /**
@@ -55,27 +57,44 @@ export async function resolveSkill(
 }
 
 /**
- * Symlink each declared skill into `<runDir>/.claude/skills/<name>`.
+ * Symlink each declared skill into `<agentDir>/.claude/skills/<name>`.
  *
- * Idempotent: if a symlink already exists at the target it's replaced. This
- * lets the dispatcher call stageSkills before the spawn without worrying
- * about whether runDir was reused (it isn't today, but the invariant is
- * cheap to maintain).
+ * Idempotent and self-pruning: before writing, every existing symlink in the
+ * target dir is removed. That way a skill dropped from agent.toml disappears
+ * from the worker's view on the next spawn without leaving a stale link.
  */
 export async function stageSkills(input: StageSkillsInput): Promise<void> {
-  if (input.skills.length === 0) return;
+  const targetDir = path.join(input.agentDir, ".claude", "skills");
 
-  const targetDir = path.join(input.runDir, ".claude", "skills");
+  if (input.skills.length === 0) {
+    await pruneSymlinks(targetDir);
+    return;
+  }
+
   await mkdir(targetDir, { recursive: true });
+  await pruneSymlinks(targetDir);
 
   for (const name of input.skills) {
     const resolved = await resolveSkill(name, { skillsDir: input.skillsDir });
     const linkPath = path.join(targetDir, name);
+    await symlink(resolved.dir, linkPath, "dir");
+  }
+}
+
+async function pruneSymlinks(dir: string): Promise<void> {
+  let entries: string[];
+  try {
+    entries = await readdir(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+  for (const name of entries) {
+    const p = path.join(dir, name);
     try {
-      await unlink(linkPath);
+      await unlink(p);
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
     }
-    await symlink(resolved.dir, linkPath, "dir");
   }
 }

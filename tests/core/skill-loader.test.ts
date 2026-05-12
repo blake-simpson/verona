@@ -7,14 +7,14 @@ import { ConfigError } from "../../src/util/errors.js";
 
 let rootDir: string;
 let skillsDir: string;
-let runDir: string;
+let agentDir: string;
 
 beforeEach(async () => {
   rootDir = await mkdtemp(path.join(tmpdir(), "verona-skills-"));
   skillsDir = path.join(rootDir, "skills");
-  runDir = path.join(rootDir, "run");
+  agentDir = path.join(rootDir, "agent");
   await mkdir(skillsDir, { recursive: true });
-  await mkdir(runDir, { recursive: true });
+  await mkdir(agentDir, { recursive: true });
 });
 
 afterEach(async () => {
@@ -47,17 +47,17 @@ describe("resolveSkill", () => {
 });
 
 describe("stageSkills", () => {
-  it("creates <runDir>/.claude/skills/<name> symlinks pointing at canonical skill dirs", async () => {
+  it("creates <agentDir>/.claude/skills/<name> symlinks pointing at canonical skill dirs", async () => {
     const copyDir = await makeSkill("copywriting");
     const uxDir = await makeSkill("ux-designer");
 
     await stageSkills({
       skills: ["copywriting", "ux-designer"],
       skillsDir,
-      runDir,
+      agentDir,
     });
 
-    const target = path.join(runDir, ".claude", "skills");
+    const target = path.join(agentDir, ".claude", "skills");
     const st = await stat(target);
     expect(st.isDirectory()).toBe(true);
 
@@ -65,25 +65,47 @@ describe("stageSkills", () => {
     expect(await readlink(path.join(target, "ux-designer"))).toBe(uxDir);
   });
 
-  it("is a no-op when skills is empty", async () => {
-    await stageSkills({ skills: [], skillsDir, runDir });
-    // .claude/skills should NOT exist when no skills declared.
-    await expect(stat(path.join(runDir, ".claude", "skills"))).rejects.toMatchObject({
+  it("is a no-op (no skills dir created) when none are declared and none were staged before", async () => {
+    await stageSkills({ skills: [], skillsDir, agentDir });
+    await expect(stat(path.join(agentDir, ".claude", "skills"))).rejects.toMatchObject({
       code: "ENOENT",
     });
   });
 
-  it("is idempotent — re-staging the same skills replaces stale links cleanly", async () => {
+  it("prunes stale symlinks when a skill is removed from agent.toml between spawns", async () => {
+    await makeSkill("copywriting");
+    await makeSkill("ux-designer");
+    await stageSkills({ skills: ["copywriting", "ux-designer"], skillsDir, agentDir });
+    await stageSkills({ skills: ["copywriting"], skillsDir, agentDir });
+
+    const target = path.join(agentDir, ".claude", "skills");
+    await stat(path.join(target, "copywriting"));
+    await expect(stat(path.join(target, "ux-designer"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  it("clears every staged skill when the agent's list is emptied", async () => {
+    await makeSkill("copywriting");
+    await stageSkills({ skills: ["copywriting"], skillsDir, agentDir });
+    await stageSkills({ skills: [], skillsDir, agentDir });
+
+    await expect(
+      stat(path.join(agentDir, ".claude", "skills", "copywriting")),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("is idempotent — re-staging the same skills leaves the link intact", async () => {
     const copyDir = await makeSkill("copywriting");
-    await stageSkills({ skills: ["copywriting"], skillsDir, runDir });
-    await stageSkills({ skills: ["copywriting"], skillsDir, runDir });
-    expect(await readlink(path.join(runDir, ".claude", "skills", "copywriting"))).toBe(copyDir);
+    await stageSkills({ skills: ["copywriting"], skillsDir, agentDir });
+    await stageSkills({ skills: ["copywriting"], skillsDir, agentDir });
+    expect(await readlink(path.join(agentDir, ".claude", "skills", "copywriting"))).toBe(copyDir);
   });
 
   it("throws ConfigError when a declared skill does not exist on disk", async () => {
     await makeSkill("present");
     await expect(
-      stageSkills({ skills: ["present", "absent"], skillsDir, runDir }),
+      stageSkills({ skills: ["present", "absent"], skillsDir, agentDir }),
     ).rejects.toBeInstanceOf(ConfigError);
   });
 });
