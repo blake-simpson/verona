@@ -30,7 +30,7 @@ import {
   resolveSkillsDir,
   statePaths,
 } from "../state/paths.js";
-import { ConfigError } from "../util/errors.js";
+import { AdapterError, ConfigError } from "../util/errors.js";
 import { AuditLog } from "./audit-log.js";
 import {
   type UserConnectorRecord,
@@ -549,7 +549,7 @@ export class Daemon {
     });
 
     const agentSkills = agent.config.agent.skills;
-    const result = await dispatch({
+    const buildDispatchInput = (resumeId: string | null) => ({
       agentDir: agent.agentDir,
       agentName,
       taskId,
@@ -571,7 +571,7 @@ export class Daemon {
         skillsDir: resolveSkillsDir(),
       }),
       ...(onMsgTask?.prompt !== undefined && { promptPath: onMsgTask.prompt }),
-      ...(sessionId !== null && { sessionId }),
+      ...(resumeId !== null && { sessionId: resumeId }),
       ...(budgetUsd !== undefined && { budgetUsd }),
       ...(event.attachments &&
         event.attachments.length > 0 && {
@@ -579,6 +579,40 @@ export class Daemon {
         }),
       allowedTools,
     });
+
+    let result: Awaited<ReturnType<typeof dispatch>>;
+    try {
+      result = await dispatch(buildDispatchInput(sessionId));
+    } catch (err) {
+      // claude -p rejected the --resume because the anchored session no
+      // longer exists in its history (e.g. the spawn CWD changed across
+      // versions and the session lived under the old project). Forget the
+      // stale anchor and retry once with a fresh session. The agent loses
+      // prior turns' context for this thread, but the user gets a reply
+      // and future replies in the same thread resume correctly.
+      if (err instanceof AdapterError && err.sessionNotFound && sessionId && threadKey) {
+        process.stderr.write(
+          `[daemon] ${agentName}: stale session anchor for thread ${threadKey}; forgetting and retrying with a fresh session\n`,
+        );
+        await this.sessionStore.forgetSession(agentName, threadKey);
+        try {
+          result = await dispatch(buildDispatchInput(null));
+        } catch (retryErr) {
+          process.stderr.write(
+            `[daemon] ${agentName}: retry after stale-session recovery also failed (${String(retryErr)}); skipping reply\n`,
+          );
+          return;
+        }
+      } else {
+        // Any other adapter error: log and skip. The dispatcher already
+        // recorded a failed adapter_invocation in the audit log, so the
+        // failure is visible via `verona invocations`.
+        process.stderr.write(
+          `[daemon] ${agentName}: dispatch failed for inbound from ${event.connectorId} (${String(err)}); skipping reply\n`,
+        );
+        return;
+      }
+    }
 
     if (result.response.sessionId && threadKey) {
       await this.sessionStore.setSession(agentName, threadKey, result.response.sessionId);

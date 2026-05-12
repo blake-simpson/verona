@@ -23,7 +23,11 @@ log="${VERONA_FAKE_CLAUDE_LOG:-/dev/null}"
 
 exit_code="${VERONA_FAKE_CLAUDE_EXIT:-0}"
 if [[ "$exit_code" != "0" ]]; then
-  echo "fake-claude: forced exit $exit_code" >&2
+  if [[ -n "${VERONA_FAKE_CLAUDE_STDERR:-}" ]]; then
+    printf '%s\n' "$VERONA_FAKE_CLAUDE_STDERR" >&2
+  else
+    echo "fake-claude: forced exit $exit_code" >&2
+  fi
   exit "$exit_code"
 fi
 

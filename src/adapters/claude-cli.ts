@@ -243,8 +243,17 @@ function spawnClaude(
       signal.removeEventListener("abort", onAbort);
       if (code !== 0) {
         const tail = stderrBuf.split("\n").slice(-10).join("\n");
+        // claude -p reports stale resumes as "No conversation found with
+        // session ID: <uuid>". Surface that as a recoverable signal so the
+        // inbound handler can forget the anchor and retry fresh, rather
+        // than treating every non-zero exit the same.
+        const sessionNotFound = /No conversation found with session ID/i.test(stderrBuf);
         reject(
-          new AdapterError("claude-cli", `claude exited with code ${code}\nstderr tail:\n${tail}`),
+          new AdapterError(
+            "claude-cli",
+            `claude exited with code ${code}\nstderr tail:\n${tail}`,
+            { sessionNotFound },
+          ),
         );
         return;
       }

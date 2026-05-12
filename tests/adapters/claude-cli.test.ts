@@ -117,6 +117,36 @@ describe("ClaudeCliAdapter", () => {
     await expect(adapter.invoke(buildRequest())).rejects.toThrow(/claude exited with code 1/);
   });
 
+  it("flags AdapterError.sessionNotFound when claude reports a missing session", async () => {
+    process.env.VERONA_FAKE_CLAUDE_EXIT = "1";
+    process.env.VERONA_FAKE_CLAUDE_STDERR =
+      "No conversation found with session ID: f0797f3a-7cc8-41bc-ab56-0c46a2f6b893";
+    const adapter = new ClaudeCliAdapter();
+    try {
+      await adapter.invoke(buildRequest({ sessionId: "f0797f3a-7cc8-41bc-ab56-0c46a2f6b893" }));
+      throw new Error("expected throw");
+    } catch (err) {
+      const { AdapterError } = await import("../../src/util/errors.js");
+      expect(err).toBeInstanceOf(AdapterError);
+      expect((err as InstanceType<typeof AdapterError>).sessionNotFound).toBe(true);
+    } finally {
+      delete process.env.VERONA_FAKE_CLAUDE_STDERR;
+    }
+  });
+
+  it("leaves AdapterError.sessionNotFound false for generic adapter failures", async () => {
+    process.env.VERONA_FAKE_CLAUDE_EXIT = "1";
+    const adapter = new ClaudeCliAdapter();
+    try {
+      await adapter.invoke(buildRequest());
+      throw new Error("expected throw");
+    } catch (err) {
+      const { AdapterError } = await import("../../src/util/errors.js");
+      expect(err).toBeInstanceOf(AdapterError);
+      expect((err as InstanceType<typeof AdapterError>).sessionNotFound).toBe(false);
+    }
+  });
+
   it("resolves effort to a model name (medium → sonnet)", async () => {
     const adapter = new ClaudeCliAdapter();
     const response = await adapter.invoke(buildRequest({ effort: "medium" }));

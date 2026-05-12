@@ -39,10 +39,21 @@ export class SecretError extends VeronaError {
 
 export class AdapterError extends VeronaError {
   readonly adapterId: string;
+  /**
+   * True iff the adapter rejected a `--resume <id>` because the provider has
+   * no record of that session. Surfaces a recoverable case to the dispatcher
+   * / inbound handler: forget the anchor and retry with a fresh session.
+   */
+  readonly sessionNotFound: boolean;
 
-  constructor(adapterId: string, message: string, options?: ErrorOptions) {
+  constructor(
+    adapterId: string,
+    message: string,
+    options?: ErrorOptions & { sessionNotFound?: boolean },
+  ) {
     super("adapter", `[${adapterId}] ${message}`, options);
     this.adapterId = adapterId;
+    this.sessionNotFound = options?.sessionNotFound === true;
   }
 }
 
