@@ -94,7 +94,7 @@ export class ClaudeCliAdapter implements AIAdapter {
     if (!finalEvent || finalEvent.subtype !== "success") {
       throw new AdapterError(
         "claude-cli",
-        `claude -p did not return a successful result event (subtype=${finalEvent?.subtype ?? "missing"})`,
+        `claude -p did not return a successful result event (subtype=${finalEvent?.subtype ?? "missing"}). ${summarizeStdout(result.events)}`,
       );
     }
 
@@ -153,6 +153,27 @@ interface SpawnResult {
 
 function isResultEvent(e: unknown): e is ClaudeResultEvent {
   return typeof e === "object" && e !== null && (e as { type?: unknown }).type === "result";
+}
+
+/**
+ * Build a one-paragraph diagnostic from the stream-json events claude wrote to
+ * stdout. claude -p reports most failures (API errors, bad image input, auth
+ * issues) as a `result` event with a non-success subtype and an error string
+ * in `result` — and *nothing* on stderr. Without surfacing this, a failed run
+ * shows up as `claude exited with code 1\nstderr tail:` with no reason at all.
+ */
+function summarizeStdout(events: SpawnResult["events"]): string {
+  const last = [...events].reverse().find(isResultEvent);
+  if (last) {
+    const parts = [`result subtype=${last.subtype ?? "?"}`];
+    if (last.is_error) parts.push("is_error=true");
+    if (typeof last.result === "string" && last.result.trim().length > 0) {
+      parts.push(`result=${last.result.trim().slice(0, 800)}`);
+    }
+    return parts.join(" ");
+  }
+  if (events.length === 0) return "(no stdout events — claude produced no output)";
+  return `last stdout event: ${JSON.stringify(events[events.length - 1]).slice(0, 800)}`;
 }
 
 function scrubEnv(
@@ -251,7 +272,7 @@ function spawnClaude(
         reject(
           new AdapterError(
             "claude-cli",
-            `claude exited with code ${code}\nstderr tail:\n${tail}`,
+            `claude exited with code ${code}\n${summarizeStdout(events)}\nstderr tail:\n${tail || "(empty)"}`,
             { sessionNotFound },
           ),
         );

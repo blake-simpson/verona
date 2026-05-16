@@ -23,6 +23,12 @@ log="${VERONA_FAKE_CLAUDE_LOG:-/dev/null}"
 
 exit_code="${VERONA_FAKE_CLAUDE_EXIT:-0}"
 if [[ "$exit_code" != "0" ]]; then
+  # Optionally emit a stream-json line on stdout before dying — mirrors real
+  # claude -p, which reports API/image errors as a stdout result event and
+  # often writes nothing to stderr.
+  if [[ -n "${VERONA_FAKE_CLAUDE_STDOUT_JSON:-}" ]]; then
+    printf '%s\n' "$VERONA_FAKE_CLAUDE_STDOUT_JSON"
+  fi
   if [[ -n "${VERONA_FAKE_CLAUDE_STDERR:-}" ]]; then
     printf '%s\n' "$VERONA_FAKE_CLAUDE_STDERR" >&2
   else

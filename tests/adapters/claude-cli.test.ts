@@ -134,6 +134,24 @@ describe("ClaudeCliAdapter", () => {
     }
   });
 
+  it("surfaces the stdout result event when claude exits non-zero with empty stderr", async () => {
+    process.env.VERONA_FAKE_CLAUDE_EXIT = "1";
+    process.env.VERONA_FAKE_CLAUDE_STDOUT_JSON = JSON.stringify({
+      type: "result",
+      subtype: "error_during_execution",
+      is_error: true,
+      result: "image exceeds 8000x8000 pixel limit",
+    });
+    const adapter = new ClaudeCliAdapter();
+    try {
+      await expect(adapter.invoke(buildRequest())).rejects.toThrow(
+        /error_during_execution[\s\S]*image exceeds 8000x8000 pixel limit/,
+      );
+    } finally {
+      delete process.env.VERONA_FAKE_CLAUDE_STDOUT_JSON;
+    }
+  });
+
   it("leaves AdapterError.sessionNotFound false for generic adapter failures", async () => {
     process.env.VERONA_FAKE_CLAUDE_EXIT = "1";
     const adapter = new ClaudeCliAdapter();
