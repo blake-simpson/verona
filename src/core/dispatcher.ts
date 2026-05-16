@@ -302,6 +302,7 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
         toolCalls: 0,
         ok: false,
         errorClass: err instanceof Error ? err.name : "Error",
+        errorMessage: failureMessage(err),
       };
       await input.auditLog.append(failedRecord);
     }
@@ -378,6 +379,19 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
   }
 
   return { runId, startedAt, finishedAt, response, episodicLogPath, connectorIdsCalled };
+}
+
+/**
+ * Extract a bounded, human-readable failure detail for the audit record.
+ * AdapterError.message already includes the `claude -p` stderr tail, which is
+ * exactly what's needed to diagnose a failed run from `verona invocations`
+ * alone. Capped so a pathological stderr can't bloat the NDJSON line.
+ */
+function failureMessage(err: unknown): string {
+  const raw = err instanceof Error ? err.message : String(err);
+  const trimmed = raw.trim();
+  const MAX = 2000;
+  return trimmed.length > MAX ? `${trimmed.slice(0, MAX)}… (truncated)` : trimmed;
 }
 
 function triggerForRecord(t: DispatchTrigger): AdapterInvocationRecord["trigger"] {

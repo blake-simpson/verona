@@ -8,6 +8,8 @@ import { runCosts } from "../../src/cli/commands/costs.js";
 import { runInit } from "../../src/cli/commands/init.js";
 import { runInvocations } from "../../src/cli/commands/invocations.js";
 import { runScheduleRun } from "../../src/cli/commands/schedule.js";
+import { AuditLog } from "../../src/core/audit-log.js";
+import { statePaths } from "../../src/state/paths.js";
 
 const FIXTURE_HELLO = path.resolve(
   fileURLToPath(import.meta.url),
@@ -56,6 +58,41 @@ describe("verona invocations + verona costs (end-to-end)", () => {
     const parsed = JSON.parse(lines[0]!);
     expect(parsed.type).toBe("adapter_invocation");
     expect(parsed.agent).toBe("hello-world");
+  });
+
+  it("surfaces errorMessage on an indented detail line for failed records", async () => {
+    const paths = statePaths(stateDir);
+    const log = new AuditLog({
+      filePath: paths.invocations,
+      rotatedDir: path.join(paths.logs, "invocations"),
+    });
+    await log.append({
+      ts: new Date().toISOString(),
+      type: "adapter_invocation",
+      runId: "01TESTRUNFAILXYZ",
+      agent: "lead-generator",
+      task: "reply",
+      trigger: { kind: "message", from: "U08HY4CFH5H" },
+      adapter: "claude-cli",
+      modelUsed: "(unknown)",
+      effort: "medium",
+      tokens: { input: 0, output: 0 },
+      costUsd: null,
+      subscriptionCovered: false,
+      durationMs: 9601,
+      toolCalls: 0,
+      ok: false,
+      errorClass: "AdapterError",
+      errorMessage: "claude exited with code 1\nstderr tail:\nimage exceeds maximum size",
+    });
+    await log.drain();
+
+    const out = await runInvocations({ stateDir });
+    expect(out).toContain("ERR");
+    expect(out).toContain("lead-generator:reply");
+    // Reason rendered on a continuation line, multi-line stderr re-indented.
+    expect(out).toContain("↳ claude exited with code 1");
+    expect(out).toContain("image exceeds maximum size");
   });
 
   it("--agent filter narrows results", async () => {

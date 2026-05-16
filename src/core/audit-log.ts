@@ -31,6 +31,13 @@ interface AuditRecordBase {
   agent?: string;
   ok: boolean;
   errorClass?: string;
+  /**
+   * Human-readable failure detail for `ok: false` records. For adapter
+   * failures this carries the AdapterError message including the `claude -p`
+   * stderr tail, so `verona invocations` can show *why* a run failed without
+   * having to dig through journald. Truncated by the writer; never required.
+   */
+  errorMessage?: string;
 }
 
 export interface AdapterInvocationRecord extends AuditRecordBase {

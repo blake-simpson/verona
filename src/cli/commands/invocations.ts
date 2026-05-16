@@ -52,20 +52,28 @@ export async function runInvocations(opts: InvocationsOptions = {}): Promise<str
 function formatRecord(r: AuditRecord): string {
   const ok = r.ok ? "ok " : "ERR";
   const ts = r.ts.replace("T", " ").slice(0, 19);
+  // For failed records, surface the reason on an indented continuation line so
+  // the table stays scannable but the failure is diagnosable without journald.
+  const detail =
+    !r.ok && r.errorMessage
+      ? `\n    ↳ ${r.errorMessage.replace(/\n/g, "\n      ")}`
+      : !r.ok && r.errorClass
+        ? `\n    ↳ ${r.errorClass}`
+        : "";
   if (r.type === "adapter_invocation") {
     const cost = r.subscriptionCovered ? "subscription" : `$${r.costUsd?.toFixed(4) ?? "?"}`;
-    return `${ts} ${ok} ${r.type.padEnd(20)} ${r.agent}:${r.task} adapter=${r.adapter} model=${r.modelUsed} tokens=${r.tokens.input}/${r.tokens.output} ${cost} ${r.durationMs}ms run=${r.runId.slice(0, 8)}`;
+    return `${ts} ${ok} ${r.type.padEnd(20)} ${r.agent}:${r.task} adapter=${r.adapter} model=${r.modelUsed} tokens=${r.tokens.input}/${r.tokens.output} ${cost} ${r.durationMs}ms run=${r.runId.slice(0, 8)}${detail}`;
   }
   if (r.type === "connector_send") {
-    return `${ts} ${ok} ${r.type.padEnd(20)} ${r.agent ?? "?"} via=${r.connector} dest=${r.destination} ${r.messageBytes}b run=${r.runId.slice(0, 8)}`;
+    return `${ts} ${ok} ${r.type.padEnd(20)} ${r.agent ?? "?"} via=${r.connector} dest=${r.destination} ${r.messageBytes}b run=${r.runId.slice(0, 8)}${detail}`;
   }
   if (r.type === "connector_call") {
     const dest = r.destination ? ` dest=${r.destination}` : "";
     const thread = r.threadKey ? ` thread=${r.threadKey}` : "";
-    return `${ts} ${ok} ${r.type.padEnd(20)} ${r.agent ?? "?"} via=${r.connector} cap=${r.capability}${dest}${thread} ${r.messageBytes}b run=${r.runId.slice(0, 8)}`;
+    return `${ts} ${ok} ${r.type.padEnd(20)} ${r.agent ?? "?"} via=${r.connector} cap=${r.capability}${dest}${thread} ${r.messageBytes}b run=${r.runId.slice(0, 8)}${detail}`;
   }
   // connector_receive
-  return `${ts} ${ok} ${r.type.padEnd(20)} ${r.agent ?? "(unrouted)"} via=${r.connector} from=${r.fromUser ?? "?"} ${r.messageBytes}b run=${r.runId.slice(0, 8)}`;
+  return `${ts} ${ok} ${r.type.padEnd(20)} ${r.agent ?? "(unrouted)"} via=${r.connector} from=${r.fromUser ?? "?"} ${r.messageBytes}b run=${r.runId.slice(0, 8)}${detail}`;
 }
 
 const DURATION_RE = /^(\d+)\s*(s|m|h|d)$/;
