@@ -167,6 +167,7 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
     agentName: input.agentName,
     taskId: input.taskId,
     skills,
+    isResume: input.sessionId !== undefined,
   });
 
   const userPrompt = await composeUserPrompt({

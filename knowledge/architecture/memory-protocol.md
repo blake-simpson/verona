@@ -41,16 +41,18 @@ Three layers, defense-in-depth:
 The system prompt for a task contains:
 1. `SOUL.md` (verbatim).
 2. Framing block: "your memory is at `<path>`; read INDEX.md first; only read other files when INDEX directs you."
-3. `memory/INDEX.md` (verbatim, capped ≤200 lines).
-4. Task prompt (`tasks/<id>.md`).
+3. `memory/learned/facts/preferences.md` (verbatim, optional, capped ≤60 lines) — current user-stated behaviour rules. **Frozen across `--resume`**: only loaded on fresh `--session-id` spawns. On resumes, the agent sees prior preferences via replayed conversation history; reloading would burn prompt cache and risk mid-thread whiplash.
+4. `memory/INDEX.md` (verbatim, capped ≤200 lines).
+5. Task prompt (`tasks/<id>.md`).
 
-`memory/core/**` and `memory/learned/**` are NOT loaded eagerly. The agent uses its own `Read` tool when INDEX.md tells it to. This is the structural fix for input-token bloat.
+`memory/core/**` and the rest of `memory/learned/**` are NOT loaded eagerly. The agent uses its own `Read` tool when INDEX.md tells it to. This is the structural fix for input-token bloat. `preferences.md` is the single deliberate exception — it carries always-on user rules that the agent (and humans reviewing) need on every fresh spawn.
 
-## File size caps (enforced by `verona lint`)
+## File size caps
 
-- `INDEX.md` — warn at 180 lines, error at 250.
-- `learned/facts/*.md` — error at 100 lines (split required).
-- `core/*.md` — warn at 200 lines (human-curated, but still policed).
+- `INDEX.md` — soft cap ≤200 lines, surfaced in framing (no enforcement layer yet).
+- `learned/facts/*.md` — soft cap ≤100 lines, surfaced in framing.
+- `learned/facts/preferences.md` — **hard cap 60 lines, enforced synchronously by `memory-guard.sh`**. Writes that would push the file past 60 lines are denied at PreToolUse time; the agent gets a "rewrite to consolidate, don't append" reason and must Write a fresh shorter version.
+- `core/*.md` — human-curated, no enforcement.
 
 ## Failure mode if you break it
 
@@ -63,6 +65,8 @@ The system prompt for a task contains:
 - **Don't replace the FS hook with a chrooted subprocess.** Considered. PreToolUse hook is simpler, well-supported by Claude Code, and the hook script is auditable.
 - **Don't use a separate "memory daemon" process.** Considered for cross-agent shared memory. v1 is per-agent, isolated. Cross-agent memory is a v2 design problem with different tradeoffs.
 - **Don't make `core/**` agent-writable with a "review queue" instead.** User explicitly chose auto-write + structural protection over a queue. Don't reintroduce.
+- **Don't generalise the eager-load to all of `learned/**`.** `preferences.md` is a deliberate single-path carve-out, not a doctrinal shift. Lazy-by-default for `learned/` exists for cost reasons and to keep INDEX as the routing surface.
+- **Don't introduce a new top-level file (`directives.md`, `behaviour.md`, etc.) for the same purpose.** Considered. A reserved path inside the existing writable zone has the same effect with a smaller protocol surface — no hook allowlist widening, no new scaffold step.
 
 ## Evidence
 
@@ -74,3 +78,4 @@ The system prompt for a task contains:
 ## Revisions
 
 - 2026-05-02 — initial entry, three-layer enforcement spec.
+- 2026-05-13 — `preferences.md` eagerly loaded on fresh sessions; frozen on `--resume`; 60-line cap enforced by the hook. Closes the Slack-feedback propagation gap.
