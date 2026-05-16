@@ -148,9 +148,41 @@ describe("dispatch", () => {
       // Framing block lists the declared skills so the model knows they exist.
       expect(req.systemPrompt).toContain("Available skills");
       expect(req.systemPrompt).toContain("copywriting");
+
+      // The Skill tool must be allowlisted, else `claude -p` auto-denies the
+      // call non-interactively and the agent proceeds without the skill.
+      expect(req.allowedTools).toContain("Skill");
     } finally {
       await rm(skillsDir, { recursive: true, force: true });
     }
+  });
+
+  it("does not allowlist Skill when no skills are declared", async () => {
+    const adapter = new StubAdapter({
+      text: "ok",
+      tokens: { input: 1, output: 1 },
+      costUsd: null,
+      subscriptionCovered: true,
+      modelUsed: "claude-sonnet-4-6",
+      toolCalls: 0,
+      durationMs: 1,
+    });
+
+    await dispatch({
+      agentDir,
+      agentName: "tester",
+      taskId: "scan",
+      promptPath: "./tasks/scan.md",
+      effort: "medium",
+      trigger: { kind: "manual" },
+      adapter,
+      guardScriptPath: GUARD,
+      allowedTools: ["Read", "Write"],
+    });
+
+    const req = adapter.lastRequest!;
+    expect(req.allowedTools).toEqual(["Read", "Write"]);
+    expect(req.allowedTools).not.toContain("Skill");
   });
 
   it("propagates sessionId for resume", async () => {

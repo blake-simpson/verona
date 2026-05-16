@@ -42,7 +42,7 @@ An intermediate design staged symlinks per-spawn in `<runDir>/.claude/skills/` a
 
 1. `src/config/schema.ts` — kebab-case validation on each skill name.
 2. `src/core/skill-loader.ts` — `resolveSkill()` errors with a pointing message if `<skillsDir>/<name>/SKILL.md` is missing.
-3. `src/core/dispatcher.ts` — calls `stageSkills({ agentDir })` when `hasSkills` and sets `cwd: agentDir` on the adapter request.
+3. `src/core/dispatcher.ts` — calls `stageSkills({ agentDir })` when `hasSkills`, sets `cwd: agentDir` on the adapter request, and adds `Skill` to `allowedTools` so `claude -p` permits the call non-interactively.
 4. `src/adapters/claude-cli.ts` — passes `cwd` through to `spawn()` so Claude Code sees the project-local skills dir.
 5. `tests/core/skill-loader.test.ts` — covers happy path, missing skill, idempotent staging.
 6. `tests/core/dispatcher.test.ts` — `stages declared skills and sets cwd so claude -p discovers them` asserts the symlink target and adapter request shape.
@@ -50,6 +50,7 @@ An intermediate design staged symlinks per-spawn in `<runDir>/.claude/skills/` a
 ## Failure mode if you break it
 
 - **Skill not staged but declared** → agent calls `Skill('foo')`, Claude Code reports "skill not found", the run completes but without the guidance the skill was supposed to provide.
+- **`Skill` missing from `allowedTools`** → the skill is staged and discovered (it shows in the available-skills list) but `claude -p` is non-interactive: a tool absent from `--allowedTools` is auto-denied with no prompt. The Skill call returns the denied action descriptor (`Execute skill: <name>`), and the agent typically proceeds without it. The dispatcher adds `Skill` whenever `hasSkills`; don't drop that.
 - **cwd not set** → symlinks staged but Claude Code's project-skill discovery doesn't kick in. Symptom: skill descriptions don't appear in the worker's available-skills list.
 - **Skill missing on the server but referenced in agent.toml** → spawn throws ConfigError before invoking the adapter. This is the correct behaviour; fix by running `verona user push` from the machine where the skill exists, then `verona user pull` (or wait for auto-sync) on the server.
 
@@ -70,3 +71,4 @@ An intermediate design staged symlinks per-spawn in `<runDir>/.claude/skills/` a
 
 - 2026-05-12 — initial entry; first-class skills mechanism shipped in 0.4.1.
 - 2026-05-12 — 0.4.2: moved staging from `<runDir>/.claude/skills/` to `<agentDir>/.claude/skills/`, cwd from runDir to agentDir. Fixes session-resume failure (`No conversation found with session ID: …`) that crashed the daemon on Slack thread replies.
+- 2026-05-16 — dispatcher adds `Skill` to `allowedTools` when `hasSkills`. Without it, `claude -p` auto-denied every skill call non-interactively (surfaced as `Execute skill: <name>`); discovery worked but invocation never did.

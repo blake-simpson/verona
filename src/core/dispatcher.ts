@@ -127,9 +127,11 @@ export interface DispatchInput {
   sessionStore?: SessionStore;
   /**
    * Names of skills declared in agent.toml's [agent].skills. When non-empty,
-   * the dispatcher creates a runDir, symlinks each skill into
-   * `<runDir>/.claude/skills/<name>`, and sets the adapter's cwd to runDir so
-   * `claude -p` discovers them as project-local skills.
+   * the dispatcher symlinks each skill into `<agentDir>/.claude/skills/<name>`,
+   * sets the adapter's cwd to agentDir so `claude -p` discovers them as
+   * project-local skills, and adds `Skill` to the allowlist so the call is
+   * permitted non-interactively. Staging is per-agent (not per-run) to keep
+   * the CWD stable for `--resume`.
    */
   skills?: readonly string[];
   /**
@@ -243,11 +245,18 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
     await stageSkills({ skills, skillsDir: input.skillsDir, agentDir: input.agentDir });
   }
 
-  // Extend allowedTools so the agent can call its MCP-exposed verona tools.
-  // The model needs `mcp__verona__*` (or specific names) in its allowlist;
-  // we add the wildcard alongside whatever the task already declared.
+  // Extend allowedTools so the agent can call its MCP-exposed verona tools
+  // and any staged skills. The model needs `mcp__verona__*` in its allowlist
+  // when connectors are subscribed. Skills are discovered project-local, but
+  // `claude -p` still gates the Skill tool through the permission allowlist;
+  // without `Skill` here the call is auto-denied non-interactively and the
+  // agent silently proceeds without the skill.
   const baseAllowed = input.allowedTools ?? [];
-  const allowedTools = hasSubs ? [...baseAllowed, "mcp__verona__*"] : baseAllowed;
+  const allowedTools = [
+    ...baseAllowed,
+    ...(hasSubs ? ["mcp__verona__*"] : []),
+    ...(hasSkills ? ["Skill"] : []),
+  ];
 
   const adapterRequest: AdapterRequest = {
     agentName: input.agentName,
