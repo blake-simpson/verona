@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.7
+
+**Released:** 2026-05-16
+
+### Changes since v0.4.6
+
+- fix: reject Slack downloads that return an HTML auth page
+
 ## v0.4.6
 
 **Released:** 2026-05-16
