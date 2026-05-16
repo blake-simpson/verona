@@ -59,9 +59,10 @@ export interface DispatchInput {
    */
   attachments?: ReadonlyArray<{
     filename: string;
-    localPath: string;
+    localPath?: string;
     mimeType?: string;
     size: number;
+    unavailable?: string;
   }>;
   effort: Effort;
   budgetUsd?: number;
@@ -494,9 +495,10 @@ async function composeUserPrompt(input: {
   userMessage?: string;
   attachments?: ReadonlyArray<{
     filename: string;
-    localPath: string;
+    localPath?: string;
     mimeType?: string;
     size: number;
+    unavailable?: string;
   }>;
 }): Promise<string> {
   const taskPrompt = input.promptPath
@@ -516,11 +518,20 @@ async function composeUserPrompt(input: {
   }
 
   if (input.attachments && input.attachments.length > 0) {
-    const lines = ["## Attached files (saved locally)", ""];
+    const lines = ["## Attached files", ""];
     let i = 1;
     for (const a of input.attachments) {
       const mime = a.mimeType ?? "application/octet-stream";
-      lines.push(`${i}. ${a.filename} — ${mime} — ${a.localPath} — ${a.size} bytes`);
+      if (a.unavailable || !a.localPath) {
+        lines.push(
+          `${i}. ${a.filename} — ${mime} — COULD NOT BE RETRIEVED (${a.unavailable ?? "no local copy"}). ` +
+            "Do not try to read it. Tell the user plainly that this attachment was sent but you could not access it, and why.",
+        );
+      } else {
+        lines.push(
+          `${i}. ${a.filename} — ${mime} — ${a.localPath} — ${a.size} bytes (read it with the Read tool)`,
+        );
+      }
       i += 1;
     }
     lines.push("");

@@ -316,8 +316,17 @@ export class SlackConnector implements Connector {
     for (const f of files) {
       const url = f.url_private_download ?? f.url_private;
       const filename = sanitizeFilename(f.name ?? f.title ?? f.id ?? "attachment");
+      const meta = {
+        filename,
+        ...(f.mimetype && { mimeType: f.mimetype }),
+        ...(f.id && { source: { connectorId: this.id, ref: f.id } }),
+      };
+      const drop = (reason: string): void => {
+        process.stderr.write(`[slack] ${filename} unavailable: ${reason}\n`);
+        out.push({ ...meta, size: 0, unavailable: reason });
+      };
       if (!url) {
-        process.stderr.write(`[slack] file ${filename} has no download URL; skipping\n`);
+        drop("no download URL on the Slack file object");
         continue;
       }
       try {
@@ -325,25 +334,41 @@ export class SlackConnector implements Connector {
           headers: { Authorization: `Bearer ${this.init.botToken}` },
         });
         if (!res.ok) {
-          process.stderr.write(`[slack] download of ${filename} failed: HTTP ${res.status}\n`);
+          drop(`Slack returned HTTP ${res.status}`);
           continue;
         }
         const bytes = Buffer.from(await res.arrayBuffer());
+        // Slack serves an HTML sign-in page with HTTP 200 when the bot token
+        // lacks the `files:read` scope. Writing that as the file poisons the
+        // run (the model gets HTML fed as an image → API 400). Reject any
+        // response that isn't real binary file content.
+        const contentType = res.headers.get("content-type") ?? "";
+        if (bytes.length === 0) {
+          drop("Slack returned an empty body");
+          continue;
+        }
+        if (/^\s*text\/html/i.test(contentType) || looksLikeHtml(bytes)) {
+          drop(
+            "Slack served an HTML page instead of the file — the bot token is " +
+              "almost certainly missing the `files:read` OAuth scope (reinstall the app)",
+          );
+          continue;
+        }
         const localPath = path.join(targetDir, filename);
         await writeFile(localPath, bytes);
-        out.push({
-          filename,
-          localPath,
-          size: bytes.length,
-          ...(f.mimetype && { mimeType: f.mimetype }),
-          ...(f.id && { source: { connectorId: this.id, ref: f.id } }),
-        });
+        out.push({ ...meta, localPath, size: bytes.length });
       } catch (err) {
-        process.stderr.write(`[slack] download of ${filename} threw: ${String(err)}\n`);
+        drop(`download threw: ${String(err)}`);
       }
     }
     return out;
   }
+}
+
+/** True if the first bytes look like an HTML document (Slack auth/error page). */
+function looksLikeHtml(buf: Buffer): boolean {
+  const head = buf.subarray(0, 256).toString("utf8").trimStart().toLowerCase();
+  return head.startsWith("<!doctype html") || head.startsWith("<html");
 }
 
 function sanitizeFilename(name: string): string {

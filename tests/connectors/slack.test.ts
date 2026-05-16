@@ -121,6 +121,66 @@ describe("SlackConnector", () => {
     expect((auditRecords[0] as { type: string }).type).toBe("connector_receive");
   });
 
+  it("flags an image as unavailable when Slack serves an HTML auth page (no poisoned file)", async () => {
+    const { mkdtemp, readdir } = await import("node:fs/promises");
+    const { tmpdir } = await import("node:os");
+    const pathMod = await import("node:path");
+    const runsDir = await mkdtemp(pathMod.join(tmpdir(), "verona-slack-att-"));
+    ctx = {
+      deliver: async (e) => {
+        delivered.push(e);
+      },
+      audit: (r) => {
+        auditRecords.push(r);
+      },
+      runsDir,
+    } as ConnectorContext;
+
+    // Slack returns HTTP 200 with an HTML sign-in page when files:read is missing.
+    vi.stubGlobal(
+      "fetch",
+      async () =>
+        new Response("<!DOCTYPE html><html><title>Slack</title>password</html>", {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" },
+        }),
+    );
+
+    const c = new SlackConnector({
+      botToken: "xoxb-test",
+      appToken: "xapp-test",
+      channelToAgent: new Map([["C123", "lead-generator"]]),
+      socketFactory: fakeSocketFactory(socket),
+      webFactory: () => web,
+    });
+    await c.start(ctx);
+
+    await socket.fire("app_mention", {
+      event: {
+        type: "app_mention",
+        text: "see screenshot",
+        user: "U_USER",
+        channel: "C123",
+        ts: "1714632999.000100",
+        files: [
+          { id: "F1", name: "Image from iOS.jpg", mimetype: "image/jpeg", url_private: "https://files.slack.com/x" },
+        ],
+      },
+      ack: async () => {},
+    });
+
+    const att = delivered[0]?.attachments?.[0];
+    expect(att).toBeDefined();
+    expect(att?.unavailable).toMatch(/files:read/);
+    expect(att?.localPath).toBeUndefined();
+    // Nothing was written to disk — no poisoned .jpg.
+    const inboundDirs = await readdir(runsDir).catch(() => []);
+    for (const d of inboundDirs) {
+      const inner = await readdir(pathMod.join(runsDir, d, "inbound")).catch(() => []);
+      expect(inner).toHaveLength(0);
+    }
+  });
+
   it("preserves thread_ts when message is a thread reply", async () => {
     const c = new SlackConnector({
       botToken: "xoxb-test",

@@ -54,10 +54,19 @@ export interface InboundAttachment {
   /**
    * Absolute path inside the per-run scratch dir (<runsDir>/<runId>/inbound/...).
    * The dispatcher adds the dir to the agent's --add-dir so Read can open it.
+   * Absent when the file could not be retrieved — see `unavailable`.
    */
-  localPath: string;
-  /** Size in bytes after download. */
+  localPath?: string;
+  /** Size in bytes after download. 0 when unavailable. */
   size: number;
+  /**
+   * Set when the attachment could NOT be downloaded as usable bytes (e.g. the
+   * source served an auth/HTML page instead of the file). Carries a short
+   * reason. The dispatcher tells the agent so it can acknowledge it couldn't
+   * view the file rather than silently answering as if nothing was attached,
+   * or — worse — poisoning the run by feeding HTML to the model as an image.
+   */
+  unavailable?: string;
   /** Connector-native source handle (URL, file_id, etc.). Diagnostic only. */
   source?: unknown;
 }
