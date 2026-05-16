@@ -1,5 +1,15 @@
 # Changelog
 
+## v0.4.5
+
+**Released:** 2026-05-16
+
+### Changes since v0.4.3
+
+- fix: persist adapter failure detail in audit log
+- fix: allowlist Skill tool so claude -p can run staged skills
+- Preferences storage
+
 ## v0.4.3
 
 **Released:** 2026-05-12
