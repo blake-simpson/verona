@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.6
+
+**Released:** 2026-05-16
+
+### Changes since v0.4.5
+
+- fix: surface claude -p stdout error event on non-zero exit
+
 ## v0.4.5
 
 **Released:** 2026-05-16
