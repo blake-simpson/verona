@@ -57,7 +57,7 @@ describe("loadMemory", () => {
     expect(result.systemPrompt).toContain(result.parts.index);
   });
 
-  it("eagerly loads preferences.md between framing and INDEX on a fresh session", async () => {
+  it("loads preferences.md LAST, after INDEX, wrapped as hard constraints", async () => {
     await seedAgent({
       preferences: "# Preferences\n- No em-dashes anywhere.",
     });
@@ -71,27 +71,31 @@ describe("loadMemory", () => {
     expect(result.parts.preferences).toContain("No em-dashes");
 
     const idxFraming = result.systemPrompt.indexOf(result.parts.framing);
-    const idxPrefs = result.systemPrompt.indexOf(result.parts.preferences!);
     const idxIndex = result.systemPrompt.indexOf(result.parts.index);
+    const idxPrefs = result.systemPrompt.indexOf(result.parts.preferences!);
     expect(idxFraming).toBeGreaterThanOrEqual(0);
-    expect(idxPrefs).toBeGreaterThan(idxFraming);
-    expect(idxIndex).toBeGreaterThan(idxPrefs);
+    expect(idxIndex).toBeGreaterThan(idxFraming);
+    // preferences is the final, highest-adherence section.
+    expect(idxPrefs).toBeGreaterThan(idxIndex);
+    expect(result.systemPrompt).toContain("USER PREFERENCES — HARD OUTPUT CONSTRAINTS");
+    expect(result.systemPrompt).toContain("never claim compliance you did not check");
   });
 
-  it("skips preferences.md when isResume=true", async () => {
+  it("loads preferences.md regardless of session state (no resume carve-out)", async () => {
     await seedAgent({
       preferences: "# Preferences\n- No em-dashes anywhere.",
     });
 
+    // loadMemory has no resume parameter any more — the preferences contract
+    // is re-asserted on every spawn so it survives context compaction.
     const result = await loadMemory({
       agentDir,
       agentName: "tester",
       taskId: "scan",
-      isResume: true,
     });
 
-    expect(result.parts.preferences).toBeNull();
-    expect(result.systemPrompt).not.toContain("No em-dashes");
+    expect(result.parts.preferences).toContain("No em-dashes");
+    expect(result.systemPrompt).toContain("No em-dashes");
   });
 
   it("treats an empty preferences.md as absent", async () => {

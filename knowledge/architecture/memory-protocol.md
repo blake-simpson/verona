@@ -41,11 +41,11 @@ Three layers, defense-in-depth:
 The system prompt for a task contains:
 1. `SOUL.md` (verbatim).
 2. Framing block: "your memory is at `<path>`; read INDEX.md first; only read other files when INDEX directs you."
-3. `memory/learned/facts/preferences.md` (verbatim, optional, capped ≤60 lines) — current user-stated behaviour rules. **Frozen across `--resume`**: only loaded on fresh `--session-id` spawns. On resumes, the agent sees prior preferences via replayed conversation history; reloading would burn prompt cache and risk mid-thread whiplash.
-4. `memory/INDEX.md` (verbatim, capped ≤200 lines).
+3. `memory/INDEX.md` (verbatim, capped ≤200 lines).
+4. `memory/learned/facts/preferences.md` (optional, capped ≤60 lines) — current user-stated behaviour rules, wrapped as a "HARD OUTPUT CONSTRAINTS" block and placed **last** so it is the highest-adherence section. Loaded on **every** spawn, including `--resume`. The system prompt is re-appended each spawn anyway, the file is ≤60 lines so the cache/whiplash cost is negligible, and the earlier "replayed conversation history carries it" assumption failed under claude-cli context compaction (the original Slack-feedback propagation bug: agents kept reverting to em-dashes / AI cadence mid-thread).
 5. Task prompt (`tasks/<id>.md`).
 
-`memory/core/**` and the rest of `memory/learned/**` are NOT loaded eagerly. The agent uses its own `Read` tool when INDEX.md tells it to. This is the structural fix for input-token bloat. `preferences.md` is the single deliberate exception — it carries always-on user rules that the agent (and humans reviewing) need on every fresh spawn.
+`memory/core/**` and the rest of `memory/learned/**` are NOT loaded eagerly. The agent uses its own `Read` tool when INDEX.md tells it to. This is the structural fix for input-token bloat. `preferences.md` is the single deliberate exception — it carries always-on user rules that the agent (and humans reviewing) need on every spawn, fresh or resumed.
 
 ## File size caps
 
@@ -79,3 +79,4 @@ The system prompt for a task contains:
 
 - 2026-05-02 — initial entry, three-layer enforcement spec.
 - 2026-05-13 — `preferences.md` eagerly loaded on fresh sessions; frozen on `--resume`; 60-line cap enforced by the hook. Closes the Slack-feedback propagation gap.
+- 2026-05-17 — `preferences.md` now loaded on **every** spawn (resume included), moved **last**, and wrapped as a HARD OUTPUT CONSTRAINTS block. The `--resume` freeze regressed multi-turn Slack threads (preferences fell out of context under compaction; agent reverted to em-dashes/AI cadence). `isResume` removed from `loadMemory`.
