@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.8
+
+**Released:** 2026-05-17
+
+### Changes since v0.4.7
+
+- fix: load preferences.md on every spawn, not just fresh sessions
+
 ## v0.4.7
 
 **Released:** 2026-05-16
