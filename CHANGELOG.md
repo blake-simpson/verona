@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.10
+
+**Released:** 2026-05-19
+
+### Changes since v0.4.9
+
+- Stream inbound replies into Slack as the model generates them
+
 ## v0.4.9
 
 **Released:** 2026-05-19
