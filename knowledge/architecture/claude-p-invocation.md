@@ -14,6 +14,7 @@ claude -p
   --settings <path-to-generated-hook-settings.json>
   --add-dir <state>/agents/<name>
   --add-dir <state>/runs/<runId>                 # only when subscriptions are set
+  --permission-mode bypassPermissions            # hooks are the boundary, not the prompt
   --append-system-prompt <SOUL + framing + INDEX>
   --max-budget-usd <task.budget_usd>             # optional
   --session-id <new-uuid>                        # new conversation
@@ -24,6 +25,8 @@ claude -p
 ```
 
 `--mcp-config` is set whenever the agent has `[connectors.<id>]` blocks, pointing at a per-task config that names the verona MCP server (`dist/mcp/verona-mcp-server.js`) plus env vars naming the agent + run + subscriptions. Tools the server registers as `slack__send_message` appear to the agent as `mcp__verona__slack__send_message`. The dispatcher extends `allowed_tools` with `mcp__verona__*` automatically when subscriptions are non-empty.
+
+**Why `--permission-mode bypassPermissions`:** `claude -p` is headless — there is no TTY to answer Claude Code's interactive permission prompt. Under the default mode every `Write`/`Edit`/`Bash` is auto-denied ("Claude requested permissions … but you haven't granted it yet"), which silently breaks the memory write boundary the architecture *intends* the PreToolUse hooks to own (memory-guard never even runs — Claude's prompt layer rejects first). `bypassPermissions` makes tool calls execute; **PreToolUse hooks still run under it and can deny** (confirmed in the Claude Code agent-SDK permissions docs), so the three guards become the *sole, intended* boundary rather than a backstop behind a prompt nobody can answer. `acceptEdits` was rejected: it unblocks file writes but still prompts for arbitrary `Bash` (e.g. `weasyprint letter.html`), so agents still couldn't run a build script. Tradeoff accepted: a shell denylist (`bash-guard.sh`) is defeatable by a determined adversary, but the threat model is accidental damage and inbound-content prompt injection by the user's own trusted model, not an attacker with a shell; `--add-dir` scoping, env scrubbing, and per-write git commits are the backstops.
 
 **Flags we DO NOT pass:**
 
@@ -49,6 +52,10 @@ The user runs `claude login` once on every host. The Claude CLI stores OAuth cre
         "hooks": [{ "type": "command", "command": "/opt/verona/runtime/dist/hooks/memory-guard.sh" }]
       },
       {
+        "matcher": "Bash",
+        "hooks": [{ "type": "command", "command": "/opt/verona/runtime/dist/hooks/bash-guard.sh" }]
+      },
+      {
         "matcher": "mcp__verona__.*",
         "hooks": [{ "type": "command", "command": "/opt/verona/runtime/dist/hooks/connector-guard.sh" }]
       }
@@ -58,6 +65,8 @@ The user runs `claude login` once on every host. The Claude CLI stores OAuth cre
 ```
 
 `memory-guard.sh` reads `tool_input.file_path` and denies writes outside `memory/INDEX.md` or `memory/learned/**`.
+
+`bash-guard.sh` reads `tool_input.command` and denies commands that reach for secrets/SSH/cloud credentials, escalate privilege (sudo/su), control the host (systemd/cron/reboot), install system/global packages, are catastrophically destructive (`rm -rf /`, `dd`, mkfs), pipe network content into a shell, or touch another agent's state under the shared agents root. Everything else is allowed so agents can do real scoped work (e.g. generate a PDF). It is a pragmatic denylist, not a sandbox — see the `--permission-mode` rationale above for the accepted threat model.
 
 `connector-guard.sh` reads the per-run policy file at `$VERONA_CONNECTOR_POLICY` (set by the adapter on the spawn env) and applies two layers:
 
@@ -81,7 +90,8 @@ Both hook scripts always exit 0 — decisions are communicated via stdout JSON w
 ## Failure mode if you break it
 
 - Pass `--bare` → user gets billed via API key without realizing.
-- Skip `--settings` → memory guard not active, agent can write anywhere.
+- Drop `--permission-mode bypassPermissions` → headless prompt can't be answered; every Write/Edit/Bash auto-denied; agents silently can't update memory or run scripts (the original "you haven't granted it yet" Slack reports).
+- Skip `--settings` → memory + bash guards not active; under bypassPermissions the agent can then write/run anywhere. The two are a pair: bypass mode is only safe *because* the hooks are wired.
 - Skip `--add-dir` → agent can't read its own memory.
 - Pass `ANTHROPIC_API_KEY` → claude-cli falls back to API-key auth even with subscription available; cost reporting becomes ambiguous.
 - Skip `--mcp-config` for an agent with subscriptions → agent has no `mcp__verona__*` tools, falls back to legacy daemon-side auto-post.
@@ -107,3 +117,4 @@ Both hook scripts always exit 0 — decisions are communicated via stdout JSON w
 
 - 2026-05-02 — initial entry; subscription-OAuth-only contract codified.
 - 2026-05-05 — `--mcp-config` is now passed when the agent has connector subscriptions; second PreToolUse matcher (`mcp__verona__.*`) wires `connector-guard.sh` for destination + sideEffect gating; `--add-dir <runDir>` exposes per-run scratch (inbound attachments, outbound files).
+- 2026-05-19 — `--permission-mode bypassPermissions` now passed; headless default mode was auto-denying all Write/Edit/Bash (memory updates + scripts silently failed). Third PreToolUse matcher (`Bash`) wires `bash-guard.sh`; hooks are now the sole intended boundary, documented threat model added.

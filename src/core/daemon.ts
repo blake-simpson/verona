@@ -18,7 +18,11 @@ import { loadAgentConfig, loadVeronaConfig } from "../config/loader.js";
 import type { ConnectorManifest, VeronaConfig } from "../config/schema.js";
 import type { Connector, ConnectorContext, InboundEvent } from "../connectors/connector.js";
 import { SlackConnector } from "../connectors/slack/index.js";
-import { connectorGuardScriptPath, memoryGuardScriptPath } from "../hooks/locate.js";
+import {
+  bashGuardScriptPath,
+  connectorGuardScriptPath,
+  memoryGuardScriptPath,
+} from "../hooks/locate.js";
 import type { SpawnSubscription } from "../mcp/spawn-config.js";
 import { buildDefaultReplyPrompt } from "./default-reply-prompt.js";
 import { getSecret } from "../secrets/store.js";
@@ -71,6 +75,7 @@ export class Daemon {
   private adapters: Map<string, AIAdapter> = new Map();
   private guardScriptPath: string;
   private connectorGuardScriptPath: string;
+  private bashGuardScriptPath: string;
   private signalHandlers: Map<NodeJS.Signals, () => void> = new Map();
   private auditLog: AuditLog;
   private sessionStore: SessionStore;
@@ -91,6 +96,7 @@ export class Daemon {
     this.stateDir = init.stateDir;
     this.guardScriptPath = memoryGuardScriptPath();
     this.connectorGuardScriptPath = connectorGuardScriptPath();
+    this.bashGuardScriptPath = bashGuardScriptPath();
     const paths = statePaths(init.stateDir);
     this.auditLog = new AuditLog({
       filePath: paths.invocations,
@@ -523,7 +529,12 @@ export class Daemon {
     // behavior, not a task. If a specific agent shouldn't have a tool here,
     // that's an override case — declare an [[tasks]] on_message=true block
     // with a narrower allowed_tools.
-    const defaultReplyTools = ["Read", "Write", "WebFetch", "WebSearch"] as const;
+    // Edit is required for the common case — updating an existing memory file
+    // (INDEX.md, preferences.md, an existing lead note). Bash lets the agent
+    // do real scoped work (generate a PDF, run a build script); bash-guard.sh
+    // is the boundary that keeps it off secrets/system. Without Edit here,
+    // every memory update was silently denied headlessly.
+    const defaultReplyTools = ["Read", "Write", "Edit", "Bash", "WebFetch", "WebSearch"] as const;
     const allowedTools = onMsgTask?.allowed_tools ?? defaultReplyTools;
     const budgetUsd = onMsgTask?.budget_usd;
 
@@ -558,6 +569,7 @@ export class Daemon {
       adapter,
       guardScriptPath: this.guardScriptPath,
       connectorGuardScriptPath: this.connectorGuardScriptPath,
+      bashGuardScriptPath: this.bashGuardScriptPath,
       auditLog: this.auditLog,
       sessionStore: this.sessionStore,
       runsDir: paths.runs,
@@ -794,6 +806,7 @@ export class Daemon {
       adapter,
       guardScriptPath: this.guardScriptPath,
       connectorGuardScriptPath: this.connectorGuardScriptPath,
+      bashGuardScriptPath: this.bashGuardScriptPath,
       auditLog: this.auditLog,
       sessionStore: this.sessionStore,
       runsDir: paths.runs,

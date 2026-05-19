@@ -2,12 +2,15 @@
  * Generates the per-task `--settings` JSON file passed to `claude -p`, plus
  * (optionally) the connector policy file consumed by connector-guard.sh.
  *
- * Two PreToolUse hooks are wired:
+ * Three PreToolUse hooks are wired:
  *   1. matcher "Write|Edit"           → memory-guard.sh   (FS write boundary)
- *   2. matcher "mcp__verona__.*"      → connector-guard.sh (Layer A gating)
+ *   2. matcher "Bash"                 → bash-guard.sh     (command boundary)
+ *   3. matcher "mcp__verona__.*"      → connector-guard.sh (Layer A gating)
  *
- * The second matcher only fires when the agent has connector subscriptions,
- * but we always wire both — the matcher is cheap and a safety net against
+ * Workers run under --permission-mode bypassPermissions (the interactive
+ * prompt can't be answered headlessly), so these hooks ARE the boundary, not
+ * a backstop. We always wire all three even when a given matcher won't fire
+ * for this agent — the matcher is cheap and a safety net against
  * misconfigured spawns.
  */
 
@@ -19,6 +22,8 @@ export interface HookSettingsRenderInput {
   guardScriptPath: string;
   /** Absolute path to connector-guard.sh on this host. */
   connectorGuardScriptPath: string;
+  /** Absolute path to bash-guard.sh on this host. */
+  bashGuardScriptPath: string;
   /** Where to write the settings file. The adapter passes this to --settings. */
   outputPath: string;
 }
@@ -33,6 +38,15 @@ export async function renderHookSettings(input: HookSettingsRenderInput): Promis
             {
               type: "command",
               command: input.guardScriptPath,
+            },
+          ],
+        },
+        {
+          matcher: "Bash",
+          hooks: [
+            {
+              type: "command",
+              command: input.bashGuardScriptPath,
             },
           ],
         },

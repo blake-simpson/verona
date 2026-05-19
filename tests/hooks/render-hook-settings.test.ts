@@ -15,17 +15,18 @@ afterEach(async () => {
 });
 
 describe("renderHookSettings", () => {
-  it("writes a JSON file with PreToolUse hooks for memory + connector guards", async () => {
+  it("writes a JSON file with PreToolUse hooks for memory + bash + connector guards", async () => {
     const outputPath = path.join(dir, "settings.json");
     await renderHookSettings({
       guardScriptPath: "/opt/verona/runtime/src/hooks/memory-guard.sh",
       connectorGuardScriptPath: "/opt/verona/runtime/src/hooks/connector-guard.sh",
+      bashGuardScriptPath: "/opt/verona/runtime/src/hooks/bash-guard.sh",
       outputPath,
     });
     const json = JSON.parse(await readFile(outputPath, "utf8")) as Record<string, unknown>;
     expect(json.hooks).toBeDefined();
     const hooks = json.hooks as { PreToolUse: unknown[] };
-    expect(hooks.PreToolUse).toHaveLength(2);
+    expect(hooks.PreToolUse).toHaveLength(3);
 
     const memEntry = hooks.PreToolUse[0] as { matcher: string; hooks: unknown[] };
     expect(memEntry.matcher).toBe("Write|Edit");
@@ -33,7 +34,13 @@ describe("renderHookSettings", () => {
     expect(memInner.type).toBe("command");
     expect(memInner.command).toBe("/opt/verona/runtime/src/hooks/memory-guard.sh");
 
-    const connEntry = hooks.PreToolUse[1] as { matcher: string; hooks: unknown[] };
+    const bashEntry = hooks.PreToolUse[1] as { matcher: string; hooks: unknown[] };
+    expect(bashEntry.matcher).toBe("Bash");
+    const bashInner = bashEntry.hooks[0] as { type: string; command: string };
+    expect(bashInner.type).toBe("command");
+    expect(bashInner.command).toBe("/opt/verona/runtime/src/hooks/bash-guard.sh");
+
+    const connEntry = hooks.PreToolUse[2] as { matcher: string; hooks: unknown[] };
     expect(connEntry.matcher).toBe("mcp__verona__.*");
     const connInner = connEntry.hooks[0] as { type: string; command: string };
     expect(connInner.type).toBe("command");

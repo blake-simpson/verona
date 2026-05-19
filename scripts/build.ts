@@ -72,7 +72,7 @@ export async function buildRuntime(opts: BuildOptions = {}): Promise<{ outDir: s
 
   // Hook scripts — tsc doesn't compile shell, copy explicitly.
   await mkdir(path.join(outDir, "dist", "hooks"), { recursive: true });
-  for (const sh of ["memory-guard.sh", "connector-guard.sh"]) {
+  for (const sh of ["memory-guard.sh", "connector-guard.sh", "bash-guard.sh"]) {
     await copyFile(
       path.join(REPO_ROOT, "src", "hooks", sh),
       path.join(outDir, "dist", "hooks", sh),

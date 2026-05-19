@@ -85,6 +85,24 @@ describe("ClaudeCliAdapter", () => {
     expect(log).toContain("--model");
   });
 
+  it("defaults to --permission-mode bypassPermissions (hooks are the boundary)", async () => {
+    const adapter = new ClaudeCliAdapter();
+    await adapter.invoke(buildRequest());
+    const log = await readFile(logPath, "utf8");
+    expect(log).toContain("--permission-mode");
+    expect(log).toContain("bypassPermissions");
+    expect(log).not.toContain("--dangerously-skip-permissions");
+  });
+
+  it("honours an explicit permissionMode override", async () => {
+    const adapter = new ClaudeCliAdapter();
+    await adapter.invoke(buildRequest({ permissionMode: "acceptEdits" }));
+    const log = await readFile(logPath, "utf8");
+    expect(log).toContain("--permission-mode");
+    expect(log).toContain("acceptEdits");
+    expect(log).not.toContain("bypassPermissions");
+  });
+
   it("uses --resume when sessionId is provided, --session-id otherwise", async () => {
     const adapter = new ClaudeCliAdapter();
     await adapter.invoke(buildRequest());

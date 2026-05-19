@@ -51,6 +51,12 @@ export class ClaudeCliAdapter implements AIAdapter {
       req.workingDir,
       "--model",
       model,
+      // Verona's boundary is the PreToolUse hook layer, not Claude Code's
+      // interactive prompt (which can't be answered under headless `-p` —
+      // every Write/Edit/Bash would otherwise be auto-denied). Hooks still
+      // run under every permission mode. See claude-p-invocation.md.
+      "--permission-mode",
+      req.permissionMode ?? "bypassPermissions",
     ];
 
     if (effortFlag) {

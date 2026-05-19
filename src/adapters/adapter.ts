@@ -37,6 +37,15 @@ export interface AdapterRequest {
    * needed).
    */
   allowedTools?: readonly string[];
+  /**
+   * Permission mode passed to `claude -p --permission-mode`. Verona's safety
+   * boundary is the PreToolUse hook layer (memory-guard, bash-guard,
+   * connector-guard), NOT Claude Code's interactive prompt — which can't be
+   * answered headlessly anyway. The dispatcher defaults this to
+   * "bypassPermissions" so tool calls execute and the hooks do the gating.
+   * claude-cli only; ignored by API adapters.
+   */
+  permissionMode?: "default" | "acceptEdits" | "plan" | "bypassPermissions";
   /** Path to the agent's state dir. The adapter passes it via --add-dir. */
   workingDir: string;
   /**

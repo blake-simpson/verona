@@ -33,7 +33,7 @@ This is enforced by a `PreToolUse` hook attached to every `claude -p` invocation
 Three layers, defense-in-depth:
 
 1. **Prompt layer** — the system prompt explicitly tells the agent the writable zone. Most well-behaved runs need only this.
-2. **Hook layer (load-bearing)** — `memory-guard.sh` rejects out-of-zone writes regardless of what the agent thinks. This is the part you must not break.
+2. **Hook layer (load-bearing)** — `memory-guard.sh` rejects out-of-zone writes regardless of what the agent thinks. This is the part you must not break. Workers run under `--permission-mode bypassPermissions` (the headless prompt can't be answered — see `claude-p-invocation.md`), so this hook is the *sole* gate on writes, not a second line behind Claude Code's permission prompt. There is no implicit prompt-layer fallback; if this hook is mis-wired the zone is wide open.
 3. **Git layer** — every memory write is auto-committed to the state dir's git repo. Even a write that somehow bypassed the hook is recoverable via `git revert`.
 
 ## Loading rules (the token-bloat fix)
@@ -80,3 +80,4 @@ The system prompt for a task contains:
 - 2026-05-02 — initial entry, three-layer enforcement spec.
 - 2026-05-13 — `preferences.md` eagerly loaded on fresh sessions; frozen on `--resume`; 60-line cap enforced by the hook. Closes the Slack-feedback propagation gap.
 - 2026-05-17 — `preferences.md` now loaded on **every** spawn (resume included), moved **last**, and wrapped as a HARD OUTPUT CONSTRAINTS block. The `--resume` freeze regressed multi-turn Slack threads (preferences fell out of context under compaction; agent reverted to em-dashes/AI cadence). `isResume` removed from `loadMemory`.
+- 2026-05-19 — clarified that `--permission-mode bypassPermissions` makes the hook the *sole* write gate; the headless default mode was previously the de-facto (broken) gate, auto-denying all memory writes. No change to the writable zone.

@@ -32,7 +32,7 @@
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json && mkdir -p dist/hooks && cp src/hooks/memory-guard.sh dist/hooks/memory-guard.sh && cp src/hooks/connector-guard.sh dist/hooks/connector-guard.sh && chmod +x dist/hooks/memory-guard.sh dist/hooks/connector-guard.sh",
+    "build": "tsc -p tsconfig.json && mkdir -p dist/hooks && cp src/hooks/memory-guard.sh dist/hooks/memory-guard.sh && cp src/hooks/connector-guard.sh dist/hooks/connector-guard.sh && cp src/hooks/bash-guard.sh dist/hooks/bash-guard.sh && chmod +x dist/hooks/memory-guard.sh dist/hooks/connector-guard.sh dist/hooks/bash-guard.sh",
     "build:runtime": "tsx scripts/build.ts",
     "dev": "tsx src/cli/index.ts",
     "test": "vitest run",

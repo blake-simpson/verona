@@ -82,6 +82,12 @@ export interface DispatchInput {
    * Required when `subscriptions` is non-empty; harmless when omitted.
    */
   connectorGuardScriptPath?: string;
+  /**
+   * Path to bash-guard.sh on this host. Wired alongside memory-guard so Bash
+   * tool calls are gated (workers run under bypassPermissions). Falls back to
+   * guardScriptPath's dir-mate when omitted; tests may point at a stub.
+   */
+  bashGuardScriptPath?: string;
   /** Working dir for hook settings + temp files. Defaults to <agentDir>/.verona-tmp. */
   scratchDir?: string;
   /** Caller-controlled cancellation. */
@@ -189,9 +195,11 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
   // it will never match. When required (subs present) the daemon supplies a
   // real script path; tests can omit and we fall back to a no-op stub path.
   const connectorGuardScriptPath = input.connectorGuardScriptPath ?? input.guardScriptPath;
+  const bashGuardScriptPath = input.bashGuardScriptPath ?? input.guardScriptPath;
   await renderHookSettings({
     guardScriptPath: input.guardScriptPath,
     connectorGuardScriptPath,
+    bashGuardScriptPath,
     outputPath: hookSettingsPath,
   });
 
