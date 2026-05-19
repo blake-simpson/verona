@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.9
+
+**Released:** 2026-05-19
+
+### Changes since v0.4.8
+
+- Run workers under bypassPermissions with a bash-guard hook
+
 ## v0.4.8
 
 **Released:** 2026-05-17
