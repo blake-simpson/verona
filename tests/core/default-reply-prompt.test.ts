@@ -80,6 +80,7 @@ describe("composeInboundUserMessage", () => {
       subscriptions: [slackSub("C1")],
       hasOnMessageTask: true, // suppresses default directive
       defaultChannel: "C1",
+      streaming: false,
     });
     expect(out).toContain("<verona-context>");
     expect(out).toContain("connector: slack");
@@ -95,8 +96,10 @@ describe("composeInboundUserMessage", () => {
       subscriptions: [slackSub("C1")],
       hasOnMessageTask: false,
       defaultChannel: "C1",
+      streaming: false,
     });
     expect(out).toMatch(/^# Reply protocol/);
+    expect(out).not.toMatch(/streaming/);
     expect(out).toMatch(/<verona-context>/);
     expect(out).toMatch(/hello bot$/);
   });
@@ -107,6 +110,7 @@ describe("composeInboundUserMessage", () => {
       subscriptions: [slackSub("C1")],
       hasOnMessageTask: true,
       defaultChannel: "C1",
+      streaming: false,
     });
     expect(out).not.toMatch(/^# Reply protocol/);
     expect(out).toMatch(/^<verona-context>/);
@@ -118,6 +122,7 @@ describe("composeInboundUserMessage", () => {
       subscriptions: [slackSub("C-FROM-CONFIG")],
       hasOnMessageTask: true,
       defaultChannel: "C-FROM-CONFIG",
+      streaming: false,
     });
     expect(out).toContain("channel: C-FROM-CONFIG");
   });
@@ -128,6 +133,7 @@ describe("composeInboundUserMessage", () => {
       subscriptions: [slackSub("C1")],
       hasOnMessageTask: true,
       defaultChannel: "C1",
+      streaming: false,
     });
     expect(out).not.toContain("thread_ts:");
   });
@@ -138,9 +144,55 @@ describe("composeInboundUserMessage", () => {
       subscriptions: [],
       hasOnMessageTask: false,
       defaultChannel: "C1",
+      streaming: false,
     });
     expect(out).not.toMatch(/^# Reply protocol/);
     expect(out).toContain("<verona-context>");
     expect(out).toContain("hello bot");
+  });
+
+  it("uses the streaming directive (plain text, no send tool) when streaming", () => {
+    const out = composeInboundUserMessage({
+      event: event({ threadKey: "T1", channelId: "C1" }),
+      subscriptions: [slackSub("C1")],
+      hasOnMessageTask: false,
+      defaultChannel: "C1",
+      streaming: true,
+    });
+    expect(out).toMatch(/^# Reply protocol \(streaming\)/);
+    expect(out).toContain("Reply as plain assistant text");
+    expect(out).toContain("Do NOT call `slack__send_message`");
+    // Must NOT carry the default "reply via a tool" steer.
+    expect(out).not.toContain("your reply MUST go through one of them");
+    expect(out).toContain("<verona-context>");
+    expect(out).toMatch(/hello bot$/);
+  });
+
+  it("on_message task still suppresses the directive even when streaming", () => {
+    const out = composeInboundUserMessage({
+      event: event({ threadKey: "T1", channelId: "C1" }),
+      subscriptions: [slackSub("C1")],
+      hasOnMessageTask: true,
+      defaultChannel: "C1",
+      streaming: true,
+    });
+    expect(out).not.toMatch(/# Reply protocol/);
+    expect(out).toMatch(/^<verona-context>/);
+  });
+});
+
+describe("buildStreamingReplyPrompt", () => {
+  it("returns null with no subscriptions (model already answers in text)", async () => {
+    const { buildStreamingReplyPrompt } = await import("../../src/core/default-reply-prompt.js");
+    expect(buildStreamingReplyPrompt([])).toBeNull();
+  });
+
+  it("steers to plain text and explicitly forbids the connector send tool", async () => {
+    const { buildStreamingReplyPrompt } = await import("../../src/core/default-reply-prompt.js");
+    const out = buildStreamingReplyPrompt([slackSub("C1")]) as string;
+    expect(out).toContain("Reply as plain assistant text");
+    expect(out).toContain("Do NOT call `slack__send_message`");
+    expect(out).toContain("Silence is acceptable");
+    expect(out.trimStart()).toMatch(/^# Reply protocol \(streaming\)/);
   });
 });

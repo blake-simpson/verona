@@ -12,7 +12,7 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
-import { SocketModeClient } from "@slack/socket-mode";
+import { LogLevel, SocketModeClient } from "@slack/socket-mode";
 import { ulid } from "ulidx";
 import { ConnectorSendError } from "../../util/errors.js";
 import type {
@@ -93,6 +93,53 @@ export interface WebLike {
   };
 }
 
+/**
+ * Socket Mode connection tuning.
+ *
+ * The library default `clientPingTimeout` is 5s: if a single client→server
+ * ping doesn't get a pong back within 5s, it tears the WebSocket down and
+ * reconnects. On a slightly laggy network that means needless reconnect
+ * churn — and inbound Slack events can be missed during the reconnect window
+ * (Socket Mode doesn't replay what was sent while we were disconnected).
+ *
+ * We widen the pong window so a brief blip is ridden out, while still
+ * detecting a genuinely dead socket within ~20s (client) / ~60s (server) and
+ * letting `autoReconnectEnabled` recover it. `logLevel: WARN` drops the
+ * routine INFO reconnect chatter but keeps real warnings/errors visible.
+ * Both timeouts are env-overridable for on-host tuning without a redeploy.
+ */
+const DEFAULT_CLIENT_PING_TIMEOUT_MS = 20_000;
+const DEFAULT_SERVER_PING_TIMEOUT_MS = 60_000;
+
+function positiveIntEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
+}
+
+export function buildSocketModeOptions(appToken: string): {
+  appToken: string;
+  autoReconnectEnabled: true;
+  clientPingTimeout: number;
+  serverPingTimeout: number;
+  logLevel: LogLevel;
+} {
+  return {
+    appToken,
+    autoReconnectEnabled: true,
+    clientPingTimeout: positiveIntEnv(
+      "VERONA_SLACK_CLIENT_PING_TIMEOUT_MS",
+      DEFAULT_CLIENT_PING_TIMEOUT_MS,
+    ),
+    serverPingTimeout: positiveIntEnv(
+      "VERONA_SLACK_SERVER_PING_TIMEOUT_MS",
+      DEFAULT_SERVER_PING_TIMEOUT_MS,
+    ),
+    logLevel: LogLevel.WARN,
+  };
+}
+
 export class SlackConnector implements Connector {
   readonly id = "slack";
   readonly direction = "both" as const;
@@ -113,7 +160,8 @@ export class SlackConnector implements Connector {
     this.ctx = ctx;
     const factory =
       this.init.socketFactory ??
-      ((token: string) => new SocketModeClient({ appToken: token }) as unknown as SocketLike);
+      ((token: string) =>
+        new SocketModeClient(buildSocketModeOptions(token)) as unknown as SocketLike);
     this.socket = factory(this.init.appToken);
     this.socket.on("app_mention", (args) => this.handleAppMention(args));
     // Phase 3: thread replies without an explicit @-mention. We listen on

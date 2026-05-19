@@ -93,3 +93,46 @@ export function buildDefaultReplyPrompt(
 
   return lines.join("\n");
 }
+
+/**
+ * Streaming variant. When the daemon has opened a live placeholder for this
+ * inbound (Slack reply streaming), the *daemon* owns delivery: the agent's
+ * plain assistant text is streamed into the placeholder token-by-token and
+ * settled when the run ends. So here we want the opposite of the default
+ * protocol — the agent must answer as plain text and must NOT call the
+ * connector's send tool (that produces no stream and would double-post,
+ * forcing the daemon to retract the placeholder).
+ *
+ * The audit trail is preserved: the daemon emits a `connector_send` record
+ * when it settles the streamed message (see connector-contract.md).
+ *
+ * Returns null when there are no subscriptions — with no connector tools the
+ * model already replies in plain text, so no steer is needed.
+ */
+export function buildStreamingReplyPrompt(
+  subscriptions: readonly SpawnSubscription[],
+): string | null {
+  if (subscriptions.length === 0) return null;
+  return [
+    "# Reply protocol (streaming)",
+    "",
+    "A user message just routed to you. Your reply streams to them live,",
+    "in-thread, as you write it — Verona delivers it for you.",
+    "",
+    "Hard rules:",
+    "",
+    "1. Reply as plain assistant text. Just write the answer directly.",
+    "2. Do NOT call `slack__send_message` or any `mcp__verona__*` connector",
+    "   tool to deliver your reply. Verona is already streaming and posting",
+    "   your text for you — a tool call would double-post and kill the live",
+    "   stream. (Non-connector tools like Read/WebFetch are fine for doing",
+    "   the work; just don't send the reply through a tool.)",
+    "3. Lead with the answer. The user watches the text appear as you type —",
+    "   no preamble, no restating the question.",
+    "4. If the message genuinely doesn't warrant a reply, produce no text.",
+    "   Silence is acceptable.",
+    "",
+    "## User message",
+    "",
+  ].join("\n");
+}

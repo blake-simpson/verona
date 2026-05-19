@@ -122,6 +122,10 @@ The override path (declare an `on_message` task) is for agents that need a
 stricter or differently-shaped reply protocol than the framework default.
 The default is the right answer for almost every agent.
 
+### Socket Mode connection tuning
+
+`SlackConnector` builds the `SocketModeClient` via `buildSocketModeOptions(appToken)`, not with library defaults. The library default `clientPingTimeout` is 5s — a single missed pong tears the WebSocket down and reconnects, and Socket Mode does **not** replay events sent while disconnected, so a brief network blip can drop inbound messages. We widen it to `clientPingTimeout: 20s` / `serverPingTimeout: 60s` with `autoReconnectEnabled: true` (rides out blips, still recovers a genuinely dead socket) and `logLevel: WARN` (drops routine reconnect INFO chatter). Both timeouts are env-overridable for on-host tuning without a redeploy: `VERONA_SLACK_CLIENT_PING_TIMEOUT_MS`, `VERONA_SLACK_SERVER_PING_TIMEOUT_MS` (positive integers; blank/zero/negative/non-numeric fall back to the defaults). Don't drop the pong WARN entirely — at the widened timeout it now signals a real outage, not a hiccup.
+
 ### Routing for thread replies without an @-mention
 
 Slack's `message` events (subscribed alongside `app_mention`) deliver thread replies that don't carry the bot's @-mention. The connector emits an `InboundEvent { kind: "thread_reply", agentTarget: null, threadKey: thread_ts }`. The daemon resolves the agent via `SessionStore.findByThreadKey(thread_ts)` — whichever agent anchored that thread (by calling `slack__send_message` earlier) is the recipient. Inbound DMs are deferred to a follow-up phase.
@@ -138,13 +142,16 @@ When a `message` event carries `files[]`, the connector downloads each file (usi
 
 For an inbound message a human is actively waiting on, `Daemon.handleInbound` opens a live reply via the connector's optional `openStream(opts)` *before* dispatch. The connector posts a placeholder immediately (so there's no dead-air wait), returns a `ConnectorStream`, and the daemon threads `onAssistantText` through `DispatchInput → AdapterRequest`. The claude-cli adapter sets `--include-partial-messages`, parses `content_block_delta`/`text_delta` events, and calls the sink with the accumulating snapshot; `SlackStreamSink` debounces those into ~1/1.5s `chat.update` edits (head-truncated to Slack's limit, with rate-limit backoff). It's gated to connectors that implement `openStream` and a resolvable destination; `VERONA_SLACK_STREAM=0` disables it and reverts to a single post.
 
-This is **not** a revival of `post_response`. It is daemon-driven *progress visibility* for a reply the user is already waiting on in-thread, not a daemon-forced *answer*. The agent still decides the answer:
+**Critical: the reply directive is inverted under streaming.** The default reply protocol (`buildDefaultReplyPrompt`) orders the agent to reply via the `slack__send_message` *tool*, not plain text. Under streaming that's exactly wrong — a tool reply emits ~no assistant text (so nothing streams), then the agent's tool post triggers `discard()`, so the user sees "…" then a single late message (the original bug). So when a stream is open, `composeInboundUserMessage` substitutes `buildStreamingReplyPrompt`: answer in **plain assistant text**, do **not** call the connector send tool — the daemon streams the text into the placeholder and `finalize()`s it. on_message tasks still own their protocol (no directive injected) regardless of streaming.
 
-- **Agent posted for itself** (a `connector_call` against the originating connector in `<runDir>/calls.ndjson`) → the daemon calls `stream.discard()`, deleting the placeholder so its own authored message stands alone. Then the legacy suppression `return` applies as before.
-- **Agent took no tool action** → `stream.finalize(result.response.text)` settles the placeholder in place. This *replaces* the legacy `connector.send(...)` auto-post for streaming connectors.
+This is **not** a revival of `post_response`. It is daemon-driven delivery of a reply the user is already waiting on in-thread. The agent still authors the answer (as text); the daemon just transports it live. Settle paths:
+
+- **Agent answered in text** (default streaming path, no `connector_call`) → `stream.finalize(result.response.text)` settles the placeholder in place. *Replaces* the legacy `connector.send(...)` auto-post for streaming connectors. The daemon emits one `connector_send` audit record on settle, so the audit chain is preserved even though the agent made no tool call.
+- **Agent posted for itself anyway** (e.g. an on_message task that calls the tool, or a deliberate cross-channel post) → `stream.discard()` deletes the placeholder so its authored message stands alone; the legacy suppression `return` applies.
+- **Empty answer** ("silence is acceptable" — agent judged no reply warranted) → `stream.discard()` instead of finalizing, so we don't push an empty (Slack-rejected) `chat.update`.
 - **Run failed** (dispatch threw, stale-session retry exhausted) → `stream.finalize(INBOUND_ERROR_REPLY)` so the placeholder never dangles as "…".
 
-`finalize()` falls back to a fresh `postMessage` if `chat.update` fails; `finalize`/`discard` are idempotent and mutually exclusive. The connector emits one `connector_send` audit record on settle (parity with the legacy path), joined on `runId`.
+`finalize()` falls back to a fresh `postMessage` if `chat.update` fails; `finalize`/`discard` are idempotent and mutually exclusive.
 
 ### Legacy auto-post suppression
 
@@ -198,4 +205,6 @@ When streaming is off (no `openStream`, disabled, or no destination) the v0.3 pa
 - 2026-05-02 — initial entry, three v1 connectors scoped (Slack, webhook, web-fetch).
 - 2026-05-05 — user-authored connectors land. Loader at `src/core/connector-loader.ts` discovers `~/.verona/user/connectors/<id>/`, dynamic-imports their compiled entry, version-keyed cache-bust enables hot reload via SIGHUP.
 - 2026-05-05 — connectors as tools: capabilities() exposed via per-spawn MCP server (`mcp__verona__<connector>__<cap>`). InboundEvent gains kind/channelId/attachments. SlackConnector subscribes to message events for thread replies + downloads attachments. Outbound thread anchoring writes to anchors.ndjson and is persisted to SessionStore by the dispatcher. Two-layer hook gating (Layer A destination + Layer B sideEffect) via `connector-guard.sh`. `post_response` removed; the agent decides via `slack__send_message`.
+- 2026-05-19 — Socket Mode ping/pong timeouts widened (`buildSocketModeOptions`): clientPingTimeout 5s→20s, serverPingTimeout 30s→60s, autoReconnect explicit, logLevel WARN. Env-overridable. Fixes reconnect churn + dropped inbound on brief network blips observed on the shakespeare host.
+- 2026-05-19 — streaming reply directive fix: the default reply protocol steers agents to the send *tool* (no assistant text → nothing streams → discard → "…" then a late single message). Under an open stream, `composeInboundUserMessage` now uses `buildStreamingReplyPrompt` (plain text, no connector send tool); finalize delivers it and emits the `connector_send` audit record. Empty answer → discard, not an empty chat.update.
 - 2026-05-19 — inbound reply streaming: optional `Connector.openStream` returns a `ConnectorStream`; `Daemon.handleInbound` posts a placeholder up front and edits it with the accumulating assistant text (`onAssistantText` threaded through DispatchInput → AdapterRequest; claude-cli sets `--include-partial-messages`). `SlackStreamSink` debounces chat.update with rate-limit backoff. Settles via finalize (no agent post — replaces legacy auto-post) or discard (agent posted for itself). Disabled by `VERONA_SLACK_STREAM=0`; cron tasks never stream.

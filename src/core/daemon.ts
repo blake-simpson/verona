@@ -46,7 +46,7 @@ import {
   discoverUserConnectors,
   instantiateUserConnector,
 } from "./connector-loader.js";
-import { buildDefaultReplyPrompt } from "./default-reply-prompt.js";
+import { buildDefaultReplyPrompt, buildStreamingReplyPrompt } from "./default-reply-prompt.js";
 import { type DispatchTrigger, dispatch } from "./dispatcher.js";
 import { type AgentSchedule, Scheduler } from "./scheduler.js";
 import { SessionStore } from "./session-store.js";
@@ -602,6 +602,7 @@ export class Daemon {
       subscriptions,
       hasOnMessageTask: onMsgTask !== undefined,
       defaultChannel: (agent.config.connectors.slack as { channel?: string } | undefined)?.channel,
+      streaming: stream !== null,
     });
 
     const agentSkills = agent.config.agent.skills;
@@ -689,9 +690,16 @@ export class Daemon {
     }
     // No tool post: the streamed message IS the reply. Settle it in place
     // with the final assistant text — this replaces the legacy auto-post for
-    // streaming connectors.
+    // streaming connectors. An empty answer means the agent judged the
+    // message didn't warrant a reply ("silence is acceptable"): retract the
+    // placeholder rather than settling it to an empty (and Slack-rejected)
+    // chat.update.
     if (stream) {
-      await stream.finalize(result.response.text);
+      if (result.response.text.trim().length > 0) {
+        await stream.finalize(result.response.text);
+      } else {
+        await stream.discard();
+      }
       return;
     }
     if (connector?.send) {
@@ -940,8 +948,14 @@ export function composeInboundUserMessage(input: {
   subscriptions: readonly SpawnSubscription[];
   hasOnMessageTask: boolean;
   defaultChannel: string | undefined;
+  /**
+   * True when the daemon opened a live stream for this inbound. The agent
+   * must then answer in plain text (the daemon streams + delivers it),
+   * NOT via the connector send tool — see buildStreamingReplyPrompt.
+   */
+  streaming: boolean;
 }): string {
-  const { event, subscriptions, hasOnMessageTask, defaultChannel } = input;
+  const { event, subscriptions, hasOnMessageTask, defaultChannel, streaming } = input;
 
   const ctxLines = ["<verona-context>", `connector: ${event.connectorId}`];
   const channel = event.channelId ?? defaultChannel;
@@ -950,7 +964,14 @@ export function composeInboundUserMessage(input: {
   ctxLines.push("</verona-context>");
   const contextBlock = ctxLines.join("\n");
 
-  const directive = hasOnMessageTask ? null : buildDefaultReplyPrompt(subscriptions);
+  // on_message tasks own their own protocol (no synthesised directive).
+  // Otherwise: streaming → steer to plain text (daemon delivers it);
+  // non-streaming → steer to the connector send tool (legacy/audited path).
+  const directive = hasOnMessageTask
+    ? null
+    : streaming
+      ? buildStreamingReplyPrompt(subscriptions)
+      : buildDefaultReplyPrompt(subscriptions);
 
   const sections: string[] = [];
   if (directive) sections.push(directive);
