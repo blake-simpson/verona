@@ -20,6 +20,7 @@ claude -p
   --session-id <new-uuid>                        # new conversation
   --resume <session-id>                          # continuation (mutually exclusive with --session-id)
   --mcp-config <state>/runs/<runId>/mcp-config.json   # only when subscriptions are set
+  --include-partial-messages                     # only when req.onAssistantText is set (reply streaming)
   --allowedTools "Read Write Edit WebFetch ... mcp__verona__*"
   "<task prompt body>"
 ```
@@ -27,6 +28,8 @@ claude -p
 `--mcp-config` is set whenever the agent has `[connectors.<id>]` blocks, pointing at a per-task config that names the verona MCP server (`dist/mcp/verona-mcp-server.js`) plus env vars naming the agent + run + subscriptions. Tools the server registers as `slack__send_message` appear to the agent as `mcp__verona__slack__send_message`. The dispatcher extends `allowed_tools` with `mcp__verona__*` automatically when subscriptions are non-empty.
 
 **Why `--permission-mode bypassPermissions`:** `claude -p` is headless — there is no TTY to answer Claude Code's interactive permission prompt. Under the default mode every `Write`/`Edit`/`Bash` is auto-denied ("Claude requested permissions … but you haven't granted it yet"), which silently breaks the memory write boundary the architecture *intends* the PreToolUse hooks to own (memory-guard never even runs — Claude's prompt layer rejects first). `bypassPermissions` makes tool calls execute; **PreToolUse hooks still run under it and can deny** (confirmed in the Claude Code agent-SDK permissions docs), so the three guards become the *sole, intended* boundary rather than a backstop behind a prompt nobody can answer. `acceptEdits` was rejected: it unblocks file writes but still prompts for arbitrary `Bash` (e.g. `weasyprint letter.html`), so agents still couldn't run a build script. Tradeoff accepted: a shell denylist (`bash-guard.sh`) is defeatable by a determined adversary, but the threat model is accidental damage and inbound-content prompt injection by the user's own trusted model, not an attacker with a shell; `--add-dir` scoping, env scrubbing, and per-write git commits are the backstops.
+
+**`--include-partial-messages`** is added only when the dispatcher passed `req.onAssistantText` (inbound Slack reply streaming — see connector-contract.md). It's purely additive: extra `{"type":"stream_event","event":{"type":"content_block_delta","index":N,"delta":{"type":"text_delta","text":"…"}}}` lines on stdout, and the terminal `result` event is byte-identical with or without it. The adapter accumulates `text_delta` text in arrival order (tool-call `input_json_delta` blocks are ignored, so the snapshot is the assistant's spoken narration) and calls the sink per delta — no throttling here; the connector's sink debounces. A throwing sink is swallowed so it can never break stdout parsing. The flag requires `-p` + `--output-format stream-json` (both always set) and works with `--resume`. Don't set it unconditionally — without subscriptions/streaming it's just stdout overhead.
 
 **Flags we DO NOT pass:**
 
@@ -77,10 +80,10 @@ Both hook scripts always exit 0 — decisions are communicated via stdout JSON w
 
 ## Output parsing
 
-`--output-format stream-json` emits one JSON object per line. The adapter accumulates:
-- assistant text deltas
-- tool-call counts
-- final usage record (token counts; `total_cost_usd` may be present but for claude-cli is treated as informational only — `subscriptionCovered: true`, `costUsd: null` in `AdapterResponse`)
+`--output-format stream-json` emits one JSON object per line. The adapter reads:
+- the terminal `result` event — its `result` string is the authoritative `AdapterResponse.text`, plus `session_id` and `num_turns`
+- the final usage record (token counts; `total_cost_usd` may be present but for claude-cli is treated as informational only — `subscriptionCovered: true`, `costUsd: null` in `AdapterResponse`)
+- `content_block_delta`/`text_delta` partial events — *only* when `req.onAssistantText` is set and `--include-partial-messages` was passed. These feed the live sink for reply streaming and never affect the returned text.
 
 ## Session continuity
 
@@ -96,6 +99,7 @@ Both hook scripts always exit 0 — decisions are communicated via stdout JSON w
 - Pass `ANTHROPIC_API_KEY` → claude-cli falls back to API-key auth even with subscription available; cost reporting becomes ambiguous.
 - Skip `--mcp-config` for an agent with subscriptions → agent has no `mcp__verona__*` tools, falls back to legacy daemon-side auto-post.
 - Forget to extend `allowed_tools` with `mcp__verona__*` → claude refuses to call connector tools even though they're advertised.
+- Treat a `text_delta` snapshot as the final answer → it's a mid-flight view; only the terminal `result` event is authoritative. Streaming is display, not truth.
 
 ## Don't re-do
 
@@ -118,3 +122,4 @@ Both hook scripts always exit 0 — decisions are communicated via stdout JSON w
 - 2026-05-02 — initial entry; subscription-OAuth-only contract codified.
 - 2026-05-05 — `--mcp-config` is now passed when the agent has connector subscriptions; second PreToolUse matcher (`mcp__verona__.*`) wires `connector-guard.sh` for destination + sideEffect gating; `--add-dir <runDir>` exposes per-run scratch (inbound attachments, outbound files).
 - 2026-05-19 — `--permission-mode bypassPermissions` now passed; headless default mode was auto-denying all Write/Edit/Bash (memory updates + scripts silently failed). Third PreToolUse matcher (`Bash`) wires `bash-guard.sh`; hooks are now the sole intended boundary, documented threat model added.
+- 2026-05-19 — `--include-partial-messages` added when `req.onAssistantText` is set; adapter parses `content_block_delta`/`text_delta` and emits accumulating snapshots for inbound Slack reply streaming. Purely additive — terminal `result` event unchanged and remains authoritative.

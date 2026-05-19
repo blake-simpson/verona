@@ -90,6 +90,7 @@ describe("Daemon inbound flow (Slack mocked)", () => {
     const realSlackConnector = slackModule.SlackConnector;
 
     const postedMessages: { channel: string; text: string; thread_ts?: string }[] = [];
+    const updatedMessages: { channel: string; ts: string; text: string }[] = [];
     const handlers = new Map<string, (args: unknown) => Promise<void> | void>();
 
     // monkeypatch SlackConnector by subclassing — we override the protected start()
@@ -109,6 +110,13 @@ describe("Daemon inbound flow (Slack mocked)", () => {
             chat: {
               async postMessage(args: { channel: string; text: string; thread_ts?: string }) {
                 postedMessages.push(args);
+                return { ok: true, ts: "1714632859.000100", channel: args.channel };
+              },
+              async update(args: { channel: string; ts: string; text: string }) {
+                updatedMessages.push(args);
+                return { ok: true };
+              },
+              async delete() {
                 return { ok: true };
               },
             },
@@ -146,10 +154,16 @@ describe("Daemon inbound flow (Slack mocked)", () => {
     });
 
     expect(acked).toBe(true);
-    // The reply was posted back to Slack
+    // Streaming: a placeholder is posted into the thread immediately, then
+    // edited in place with the final assistant text once the run settles.
     expect(postedMessages).toHaveLength(1);
     expect(postedMessages[0]?.channel).toBe("C-FEED");
     expect(postedMessages[0]?.thread_ts).toBe("1714632859.000100");
+    expect(updatedMessages.length).toBeGreaterThanOrEqual(1);
+    const lastUpdate = updatedMessages[updatedMessages.length - 1];
+    expect(lastUpdate?.channel).toBe("C-FEED");
+    expect(lastUpdate?.ts).toBe("1714632859.000100");
+    expect(lastUpdate?.text).toContain("hello from fake claude");
 
     // Audit records share the same runId
     const { runInvocations } = await import("../../src/cli/commands/invocations.js");

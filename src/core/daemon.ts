@@ -16,7 +16,12 @@ import { ClaudeCliAdapter } from "../adapters/claude-cli.js";
 import { OpenAICompatAdapter } from "../adapters/openai-compat.js";
 import { loadAgentConfig, loadVeronaConfig } from "../config/loader.js";
 import type { ConnectorManifest, VeronaConfig } from "../config/schema.js";
-import type { Connector, ConnectorContext, InboundEvent } from "../connectors/connector.js";
+import type {
+  Connector,
+  ConnectorContext,
+  ConnectorStream,
+  InboundEvent,
+} from "../connectors/connector.js";
 import { SlackConnector } from "../connectors/slack/index.js";
 import {
   bashGuardScriptPath,
@@ -24,7 +29,6 @@ import {
   memoryGuardScriptPath,
 } from "../hooks/locate.js";
 import type { SpawnSubscription } from "../mcp/spawn-config.js";
-import { buildDefaultReplyPrompt } from "./default-reply-prompt.js";
 import { getSecret } from "../secrets/store.js";
 import { listRegisteredAgents, refreshRegisteredAgents } from "../state/agent-registry.js";
 import {
@@ -42,6 +46,7 @@ import {
   discoverUserConnectors,
   instantiateUserConnector,
 } from "./connector-loader.js";
+import { buildDefaultReplyPrompt } from "./default-reply-prompt.js";
 import { type DispatchTrigger, dispatch } from "./dispatcher.js";
 import { type AgentSchedule, Scheduler } from "./scheduler.js";
 import { SessionStore } from "./session-store.js";
@@ -58,6 +63,14 @@ const BUILT_IN_SPAWN_SECRETS: Readonly<Record<string, readonly string[]>> = {
   webhook: [],
   "web-fetch": [],
 };
+
+/**
+ * Settled into a streamed placeholder when the run fails, so the user isn't
+ * left staring at a "…" that never resolves. The actual error is in the
+ * audit log (`verona invocations`).
+ */
+const INBOUND_ERROR_REPLY =
+  "⚠️ I hit an error handling that and couldn't finish a reply. Check `verona invocations` for details.";
 
 interface ConnectorMeta {
   isUserConnector: boolean;
@@ -544,6 +557,38 @@ export class Daemon {
     });
     const paths = statePaths(this.stateDir);
 
+    // Open a live reply-in-progress when the connector can edit a sent
+    // message (Slack). The placeholder lands the instant the user pings, so
+    // there's no dead-air wait while the model works; the daemon edits it
+    // with the accumulating assistant text. This is inbound-reply only — a
+    // human is actively waiting in the thread. Set VERONA_SLACK_STREAM=0 to
+    // disable and fall back to a single post on completion.
+    const connector = this.connectors.get(event.connectorId);
+    const streamingEnabled = !["0", "false", "off"].includes(
+      (process.env.VERONA_SLACK_STREAM ?? "").toLowerCase(),
+    );
+    const slackChannel = (agent.config.connectors.slack as { channel?: string } | undefined)
+      ?.channel;
+    const streamDestination = event.channelId ?? slackChannel;
+    let stream: ConnectorStream | null = null;
+    if (streamingEnabled && connector?.openStream && streamDestination) {
+      try {
+        stream = await connector.openStream({
+          runId,
+          agent: agentName,
+          destination: streamDestination,
+          ...(threadKey !== undefined && { threadKey }),
+        });
+      } catch (err) {
+        // Placeholder post failed — proceed without streaming; the legacy
+        // single-post path still delivers the reply.
+        process.stderr.write(
+          `[daemon] ${agentName}: could not open ${event.connectorId} stream (${String(err)}); replying without streaming\n`,
+        );
+        stream = null;
+      }
+    }
+
     // Build the user-prompt the agent sees. Two augmentations:
     //   - Always inject a verona-context block so the agent reliably has
     //     `thread_ts`, `channel`, and `connector` to feed into its tool
@@ -583,6 +628,7 @@ export class Daemon {
         skillsDir: resolveSkillsDir(),
       }),
       ...(onMsgTask?.prompt !== undefined && { promptPath: onMsgTask.prompt }),
+      ...(stream && { onAssistantText: (s: string) => stream?.push(s) }),
       ...(resumeId !== null && { sessionId: resumeId }),
       ...(budgetUsd !== undefined && { budgetUsd }),
       ...(event.attachments &&
@@ -613,6 +659,7 @@ export class Daemon {
           process.stderr.write(
             `[daemon] ${agentName}: retry after stale-session recovery also failed (${String(retryErr)}); skipping reply\n`,
           );
+          if (stream) await stream.finalize(INBOUND_ERROR_REPLY);
           return;
         }
       } else {
@@ -622,6 +669,7 @@ export class Daemon {
         process.stderr.write(
           `[daemon] ${agentName}: dispatch failed for inbound from ${event.connectorId} (${String(err)}); skipping reply\n`,
         );
+        if (stream) await stream.finalize(INBOUND_ERROR_REPLY);
         return;
       }
     }
@@ -630,18 +678,24 @@ export class Daemon {
       await this.sessionStore.setSession(agentName, threadKey, result.response.sessionId);
     }
 
-    // Legacy auto-post fallback. Agents that called slack__send_message (or
-    // any other capability against the originating connector) already spoke
-    // for themselves; skip auto-posting their final assistant text in that
-    // case so we don't double-message. Agents that took no action via the
-    // tool plane fall back to the v0.3 behaviour.
+    // The agent spoke for itself. Agents that called slack__send_message (or
+    // any other capability against the originating connector) own the reply;
+    // the streamed placeholder was only a live "working" view, so retract it
+    // to avoid double-messaging. Agents that took no tool action fall back to
+    // the streamed-and-settled message (or the v0.3 single post).
     if (result.connectorIdsCalled.has(event.connectorId)) {
+      if (stream) await stream.discard();
       return;
     }
-    const connector = this.connectors.get(event.connectorId);
+    // No tool post: the streamed message IS the reply. Settle it in place
+    // with the final assistant text — this replaces the legacy auto-post for
+    // streaming connectors.
+    if (stream) {
+      await stream.finalize(result.response.text);
+      return;
+    }
     if (connector?.send) {
-      const slackCfg = agent.config.connectors.slack as { channel?: string } | undefined;
-      const destination = slackCfg?.channel ?? "";
+      const destination = slackChannel ?? "";
       if (destination) {
         await connector.send({
           connectorId: event.connectorId,

@@ -130,6 +130,35 @@ export interface OutboundMessage {
   attachments?: unknown;
 }
 
+/**
+ * A live, daemon-driven reply-in-progress. Opened for an inbound message the
+ * user is actively waiting on; the connector posts a placeholder immediately,
+ * `push()` edits it as the model generates text, and exactly one of
+ * `finalize()` / `discard()` settles it once the run ends.
+ *
+ * This is distinct from `send()` (system notifications, legacy auto-post) and
+ * from agent tool posts (`capabilities()`): the agent still decides the
+ * *answer*. If it posts for itself, the daemon calls `discard()` so the
+ * placeholder doesn't double up. Not every connector implements streaming.
+ */
+export interface ConnectorStream {
+  /** Latest full accumulated assistant-text snapshot. Coalesced internally. */
+  push(snapshot: string): void;
+  /** Run ended, agent did NOT post itself: settle the placeholder with the final text. */
+  finalize(text: string): Promise<void>;
+  /** Run ended, agent posted its own message: retract the placeholder. */
+  discard(): Promise<void>;
+}
+
+export interface OpenStreamOptions {
+  runId: string;
+  agent: string;
+  /** Connector-native destination (Slack channel id). */
+  destination: string;
+  /** Reply-into-thread key (Slack thread_ts). */
+  threadKey?: string;
+}
+
 export interface ConnectorAuditRecord {
   type: "connector_send" | "connector_receive";
   connectorId: ConnectorId;
@@ -173,6 +202,15 @@ export interface Connector {
    * usually expose at least one capability.
    */
   capabilities?(): readonly ConnectorCapability[];
+  /**
+   * Open a live reply-in-progress for an inbound message. Posts the
+   * placeholder and returns a stream the daemon feeds with assistant-text
+   * snapshots, then settles via finalize()/discard(). Optional: connectors
+   * that can't edit a sent message simply omit this and the daemon falls
+   * back to a single post once the run completes. Rejects if the placeholder
+   * can't be posted (daemon then proceeds without streaming).
+   */
+  openStream?(opts: OpenStreamOptions): Promise<ConnectorStream>;
 }
 
 /**

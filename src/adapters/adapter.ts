@@ -78,6 +78,16 @@ export interface AdapterRequest {
    * adapter inherits the daemon's CWD.
    */
   cwd?: string;
+  /**
+   * Optional live-text sink. When set, the adapter emits the accumulating
+   * assistant-text snapshot (all text content so far, in arrival order) as
+   * the model generates it — used to stream a reply into Slack while the run
+   * is still in flight. claude-cli wires this to `--include-partial-messages`
+   * and parses `content_block_delta` events; adapters that can't stream may
+   * ignore it. The final returned `text` is authoritative and unaffected by
+   * whether this is set. The adapter does not throttle — the sink does.
+   */
+  onAssistantText?: (snapshot: string) => void;
   cancel: AbortSignal;
 }
 

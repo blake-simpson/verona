@@ -90,6 +90,12 @@ export interface DispatchInput {
   bashGuardScriptPath?: string;
   /** Working dir for hook settings + temp files. Defaults to <agentDir>/.verona-tmp. */
   scratchDir?: string;
+  /**
+   * Optional live-text sink. Threaded straight to the adapter so a Slack
+   * reply can stream while the run is still in flight. The dispatcher does
+   * not interpret it; the final returned text is unaffected.
+   */
+  onAssistantText?: (snapshot: string) => void;
   /** Caller-controlled cancellation. */
   cancel?: AbortSignal;
   /** Optional. When provided, dispatcher writes an adapter_invocation record per run. */
@@ -275,6 +281,7 @@ export async function dispatch(input: DispatchInput): Promise<DispatchResult> {
     workingDir: input.agentDir,
     hookSettingsPath,
     cancel: input.cancel ?? new AbortController().signal,
+    ...(input.onAssistantText !== undefined && { onAssistantText: input.onAssistantText }),
     ...(input.sessionId !== undefined && { sessionId: input.sessionId }),
     ...(input.budgetUsd !== undefined && { budgetUsd: input.budgetUsd }),
     ...(allowedTools.length > 0 && { allowedTools }),

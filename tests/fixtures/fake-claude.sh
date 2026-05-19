@@ -39,7 +39,18 @@ fi
 
 # Synthetic stream-json output. The adapter only requires a `result` event
 # with subtype=success.
-cat <<'JSON'
-{"type":"system","subtype":"init","session_id":"fake-session","tools":[]}
-{"type":"result","subtype":"success","is_error":false,"duration_ms":42,"num_turns":2,"result":"hello from fake claude","session_id":"fake-session-out","total_cost_usd":0.001234,"usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}
+echo '{"type":"system","subtype":"init","session_id":"fake-session","tools":[]}'
+
+# When asked, emit token-level partial events (mirrors
+# --include-partial-messages). Two text deltas plus an ignored tool-input
+# delta, so a sink should accumulate "hello from fake claude" and nothing
+# from the tool block.
+if [[ -n "${VERONA_FAKE_CLAUDE_PARTIAL:-}" ]]; then
+  cat <<'JSON'
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hello from "}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"{\"q\":1}"}}}
+{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"fake claude"}}}
 JSON
+fi
+
+echo '{"type":"result","subtype":"success","is_error":false,"duration_ms":42,"num_turns":2,"result":"hello from fake claude","session_id":"fake-session-out","total_cost_usd":0.001234,"usage":{"input_tokens":100,"output_tokens":20,"cache_read_input_tokens":10,"cache_creation_input_tokens":5}}'

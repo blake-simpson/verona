@@ -18,11 +18,14 @@ import { ConnectorSendError } from "../../util/errors.js";
 import type {
   Connector,
   ConnectorContext,
+  ConnectorStream,
   InboundAttachment,
   InboundEvent,
+  OpenStreamOptions,
   OutboundMessage,
 } from "../connector.js";
 import { SlackOutboundClient } from "./outbound-client.js";
+import { SlackStreamSink } from "./stream-sink.js";
 
 export interface SlackConnectorInit {
   botToken: string;
@@ -85,6 +88,8 @@ export interface WebLike {
       text: string;
       thread_ts?: string;
     }): Promise<unknown>;
+    update?(args: { channel: string; ts: string; text: string }): Promise<unknown>;
+    delete?(args: { channel: string; ts: string }): Promise<unknown>;
   };
 }
 
@@ -183,6 +188,36 @@ export class SlackConnector implements Connector {
         cause: err,
       });
     }
+  }
+
+  async openStream(opts: OpenStreamOptions): Promise<ConnectorStream> {
+    // Post the placeholder up front so dead-air is gone the instant the
+    // user pings. A failure here propagates — the daemon then proceeds
+    // without streaming and the legacy single-post path takes over.
+    const placeholder = await this.outbound.postMessage({
+      channel: opts.destination,
+      text: "…",
+      ...(opts.threadKey !== undefined && { thread_ts: opts.threadKey }),
+    });
+    return new SlackStreamSink({
+      outbound: this.outbound,
+      channel: placeholder.channel || opts.destination,
+      ts: placeholder.ts,
+      ...(opts.threadKey !== undefined && { threadKey: opts.threadKey }),
+      onSettled: ({ bytes, ok, errorClass }) => {
+        this.ctx?.audit({
+          type: "connector_send",
+          connectorId: this.id,
+          runId: opts.runId,
+          agent: opts.agent,
+          destination: opts.destination,
+          ...(opts.threadKey !== undefined && { threadKey: opts.threadKey }),
+          messageBytes: bytes,
+          ok,
+          ...(errorClass !== undefined && { errorClass }),
+        });
+      },
+    });
   }
 
   private async handleAppMention(args: SocketEventArgs): Promise<void> {

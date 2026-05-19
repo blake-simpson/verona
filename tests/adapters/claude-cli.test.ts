@@ -194,4 +194,50 @@ describe("ClaudeCliAdapter", () => {
     const response = await adapter.invoke(buildRequest({ effort: "low" }));
     expect(response.modelUsed).toContain("haiku");
   });
+
+  it("does NOT pass --include-partial-messages unless onAssistantText is set", async () => {
+    const adapter = new ClaudeCliAdapter();
+    await adapter.invoke(buildRequest());
+    const log = await readFile(logPath, "utf8");
+    expect(log).not.toContain("--include-partial-messages");
+  });
+
+  it("passes --include-partial-messages and streams accumulating snapshots", async () => {
+    process.env.VERONA_FAKE_CLAUDE_PARTIAL = "1";
+    try {
+      const snapshots: string[] = [];
+      const adapter = new ClaudeCliAdapter();
+      const response = await adapter.invoke(
+        buildRequest({ onAssistantText: (s) => snapshots.push(s) }),
+      );
+
+      const log = await readFile(logPath, "utf8");
+      expect(log).toContain("--include-partial-messages");
+
+      // Two text deltas → two cumulative snapshots; the tool-input delta in
+      // between contributes nothing.
+      expect(snapshots).toEqual(["hello from ", "hello from fake claude"]);
+      // Streaming never overrides the authoritative final result.
+      expect(response.text).toBe("hello from fake claude");
+    } finally {
+      delete process.env.VERONA_FAKE_CLAUDE_PARTIAL;
+    }
+  });
+
+  it("a throwing sink does not break the run", async () => {
+    process.env.VERONA_FAKE_CLAUDE_PARTIAL = "1";
+    try {
+      const adapter = new ClaudeCliAdapter();
+      const response = await adapter.invoke(
+        buildRequest({
+          onAssistantText: () => {
+            throw new Error("sink boom");
+          },
+        }),
+      );
+      expect(response.text).toBe("hello from fake claude");
+    } finally {
+      delete process.env.VERONA_FAKE_CLAUDE_PARTIAL;
+    }
+  });
 });

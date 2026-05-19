@@ -59,6 +59,13 @@ export class ClaudeCliAdapter implements AIAdapter {
       req.permissionMode ?? "bypassPermissions",
     ];
 
+    if (req.onAssistantText) {
+      // Token-level deltas. Purely additive to the stream — the terminal
+      // `result` event is unchanged — and requires -p + stream-json, both
+      // already set. See knowledge/architecture/claude-p-invocation.md.
+      args.push("--include-partial-messages");
+    }
+
     if (effortFlag) {
       args.push("--effort", effortFlag);
     }
@@ -93,7 +100,7 @@ export class ClaudeCliAdapter implements AIAdapter {
     const env = scrubEnv(process.env, req.workingDir, req.connectorPolicyPath);
 
     const startedAt = Date.now();
-    const result = await spawnClaude(args, env, req.cancel, req.cwd);
+    const result = await spawnClaude(args, env, req.cancel, req.cwd, req.onAssistantText);
     const durationMs = Date.now() - startedAt;
 
     const finalEvent = result.events.find(isResultEvent);
@@ -213,11 +220,44 @@ async function writeTempSystemPrompt(req: AdapterRequest): Promise<string> {
   return file;
 }
 
+/**
+ * Pull the incremental text out of a parsed stream-json line, if any.
+ *
+ * With `--include-partial-messages`, token deltas arrive as:
+ *   {"type":"stream_event","event":{"type":"content_block_delta",
+ *    "index":0,"delta":{"type":"text_delta","text":"..."}}}
+ *
+ * Tool-call blocks emit `input_json_delta` instead — ignored here so the
+ * snapshot is purely the assistant's spoken narration. We append in arrival
+ * order rather than reassembling per `index`: deltas never interleave out of
+ * order on the wire, and a flat concatenation is exactly the running
+ * narration a human wants to watch.
+ */
+function extractTextDelta(ev: unknown): string | null {
+  if (typeof ev !== "object" || ev === null) return null;
+  const e = ev as { type?: unknown; event?: unknown };
+  if (e.type !== "stream_event" || typeof e.event !== "object" || e.event === null) {
+    return null;
+  }
+  const inner = e.event as { type?: unknown; delta?: unknown };
+  if (
+    inner.type !== "content_block_delta" ||
+    typeof inner.delta !== "object" ||
+    inner.delta === null
+  ) {
+    return null;
+  }
+  const delta = inner.delta as { type?: unknown; text?: unknown };
+  if (delta.type !== "text_delta" || typeof delta.text !== "string") return null;
+  return delta.text;
+}
+
 function spawnClaude(
   args: string[],
   env: NodeJS.ProcessEnv,
   signal: AbortSignal,
   cwd?: string,
+  onAssistantText?: (snapshot: string) => void,
 ): Promise<SpawnResult> {
   const bin = claudeBin();
   return new Promise((resolve, reject) => {
@@ -229,6 +269,7 @@ function spawnClaude(
     const events: SpawnResult["events"] = [];
     let stderrBuf = "";
     let stdoutBuf = "";
+    let assistantText = "";
 
     const onAbort = () => {
       child.kill("SIGTERM");
@@ -249,7 +290,19 @@ function spawnClaude(
         stdoutBuf = stdoutBuf.slice(nl + 1);
         if (line.length === 0) continue;
         try {
-          events.push(JSON.parse(line));
+          const parsed = JSON.parse(line);
+          events.push(parsed);
+          if (onAssistantText) {
+            const delta = extractTextDelta(parsed);
+            if (delta !== null && delta.length > 0) {
+              assistantText += delta;
+              try {
+                onAssistantText(assistantText);
+              } catch {
+                // A misbehaving sink must never break stdout parsing.
+              }
+            }
+          }
         } catch {
           // non-JSON noise on stdout; ignore.
         }

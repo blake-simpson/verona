@@ -15,7 +15,7 @@ A connector has two roles, running in two different processes.
 
 | Half | Process | Owns |
 |---|---|---|
-| **Daemon-side** | the long-lived `verona daemon` | Socket Mode WebSocket, webhook listener, OAuth refresh, inbound delivery via `ctx.deliver(...)`, system-side `send()` (legacy auto-post + daemon notifications). |
+| **Daemon-side** | the long-lived `verona daemon` | Socket Mode WebSocket, webhook listener, OAuth refresh, inbound delivery via `ctx.deliver(...)`, system-side `send()` (legacy auto-post + daemon notifications), and `openStream()` (live reply-in-progress for inbound). |
 | **Spawn-side** | a per-task `verona-mcp-server.js` child of `claude -p` | Capability invocation. Reuses the same `state/secrets/_connectors/<id>/` tokens, but constructs only the outbound half (e.g. `SlackOutboundClient`, no Socket Mode). Exits when claude exits. |
 
 The agent's outbound is via the spawn-side capability tools (`mcp__verona__<connector>__<cap>`), NOT via the daemon-side `Connector.send()`. `send()` remains as the system-side outbound for daemon notifications and the legacy fallback when an inbound-message agent doesn't call any tool.
@@ -134,9 +134,21 @@ When an agent calls `slack__send_message` from inside a cron task, the capabilit
 
 When a `message` event carries `files[]`, the connector downloads each file (using the bot token) into `<state>/runs/<runId>/inbound/<filename>` and populates `InboundEvent.attachments`. The dispatcher prepends an attachment manifest section to the user prompt and adds `<runDir>` as an `--add-dir` so the agent can `Read` the files inline.
 
+### Streaming the reply-in-progress (inbound only)
+
+For an inbound message a human is actively waiting on, `Daemon.handleInbound` opens a live reply via the connector's optional `openStream(opts)` *before* dispatch. The connector posts a placeholder immediately (so there's no dead-air wait), returns a `ConnectorStream`, and the daemon threads `onAssistantText` through `DispatchInput → AdapterRequest`. The claude-cli adapter sets `--include-partial-messages`, parses `content_block_delta`/`text_delta` events, and calls the sink with the accumulating snapshot; `SlackStreamSink` debounces those into ~1/1.5s `chat.update` edits (head-truncated to Slack's limit, with rate-limit backoff). It's gated to connectors that implement `openStream` and a resolvable destination; `VERONA_SLACK_STREAM=0` disables it and reverts to a single post.
+
+This is **not** a revival of `post_response`. It is daemon-driven *progress visibility* for a reply the user is already waiting on in-thread, not a daemon-forced *answer*. The agent still decides the answer:
+
+- **Agent posted for itself** (a `connector_call` against the originating connector in `<runDir>/calls.ndjson`) → the daemon calls `stream.discard()`, deleting the placeholder so its own authored message stands alone. Then the legacy suppression `return` applies as before.
+- **Agent took no tool action** → `stream.finalize(result.response.text)` settles the placeholder in place. This *replaces* the legacy `connector.send(...)` auto-post for streaming connectors.
+- **Run failed** (dispatch threw, stale-session retry exhausted) → `stream.finalize(INBOUND_ERROR_REPLY)` so the placeholder never dangles as "…".
+
+`finalize()` falls back to a fresh `postMessage` if `chat.update` fails; `finalize`/`discard` are idempotent and mutually exclusive. The connector emits one `connector_send` audit record on settle (parity with the legacy path), joined on `runId`.
+
 ### Legacy auto-post suppression
 
-When the agent spoke for itself (any `connector_call` written to `<runDir>/calls.ndjson` against the originating connector), `Daemon.handleInbound` skips the daemon-side `connector.send(result.response.text)` fallback. Agents that take no tool action keep behaving the v0.3 way; agents that call `slack__send_message` are fully in charge.
+When streaming is off (no `openStream`, disabled, or no destination) the v0.3 path still applies: if the agent spoke for itself (any `connector_call` against the originating connector), `Daemon.handleInbound` skips the daemon-side `connector.send(result.response.text)` fallback; agents that take no tool action get the single auto-post.
 
 ## How it's enforced
 
@@ -158,7 +170,9 @@ When the agent spoke for itself (any `connector_call` written to `<runDir>/calls
 - **Don't merge inbound HTTP server connectors into one shared listener.** Each connector that needs HTTP (webhook inbound, future GitHub webhooks) gets its own port. Shared listener was tempting for resource use; it was rejected because the audit-log routing got tangled.
 - **Don't pass raw Slack event objects to the dispatcher.** Always normalize to `InboundEvent`. Connector-specific shapes leak abstraction.
 - **Don't use the same `manifest.version` across connector code changes.** The loader's cache-bust uses the version string; same version → same cached module → reload is a no-op for the new code.
-- **Don't bring back `post_response`.** The agent now decides when to post via the `slack__send_message` tool. Mixing the two would double-post or argue with the agent's own judgment. If the agent didn't say anything, it didn't think anything was worth saying.
+- **Don't bring back `post_response`.** The agent now decides when to post via the `slack__send_message` tool. Mixing the two would double-post or argue with the agent's own judgment. If the agent didn't say anything, it didn't think anything was worth saying. (Reply streaming via `openStream` is *not* this: it's progress for an inbound the user already awaits in-thread, and it `discard()`s itself the moment the agent posts for itself — it never overrides the agent's chosen answer.)
+- **Don't stream cron tasks.** Streaming is inbound-reply only — there's a human watching the thread. A scheduled task has no live audience; it posts when done. Opening a placeholder for every cron run would spam channels.
+- **Don't throttle in the adapter.** The adapter emits every text delta raw; the sink owns debounce + truncation + rate-limit backoff. Coalescing in the adapter would couple it to one connector's rate limits.
 - **Don't write to SessionStore from inside the spawn.** The MCP server writes to `<runDir>/anchors.ndjson`; the dispatcher (single writer) drains and persists after the spawn exits.
 - **Don't make capabilities `async invoke()` rely on long-lived state across calls.** Each invocation gets a fresh `CapabilityCallContext` and runs in a per-spawn process that exits with claude.
 
@@ -167,7 +181,8 @@ When the agent spoke for itself (any `connector_call` written to `<runDir>/calls
 - Initial spec: `~/.claude/plans/we-are-in-new-expressive-kay.md`
 - User-connector design: `~/.claude/plans/if-i-am-running-merry-horizon.md`
 - Connectors-as-tools design: `~/.claude/plans/honestly-i-don-t-like-scalable-galaxy.md`
-- Interface: `src/connectors/connector.ts` (Connector, ConnectorContext, UserConnectorInit, UserConnectorFactory)
+- Interface: `src/connectors/connector.ts` (Connector, ConnectorContext, ConnectorStream, OpenStreamOptions, UserConnectorInit, UserConnectorFactory)
+- Reply streaming: `src/connectors/slack/stream-sink.ts` (SlackStreamSink), `SlackConnector.openStream`, `Daemon.handleInbound` settle branches, `DispatchInput.onAssistantText`
 - Capability types: `src/connectors/capability.ts`
 - Built-in implementations: `src/connectors/{slack,webhook,web-fetch}/`
 - Slack outbound (shared by daemon-side and spawn-side): `src/connectors/slack/outbound-client.ts`
@@ -183,3 +198,4 @@ When the agent spoke for itself (any `connector_call` written to `<runDir>/calls
 - 2026-05-02 — initial entry, three v1 connectors scoped (Slack, webhook, web-fetch).
 - 2026-05-05 — user-authored connectors land. Loader at `src/core/connector-loader.ts` discovers `~/.verona/user/connectors/<id>/`, dynamic-imports their compiled entry, version-keyed cache-bust enables hot reload via SIGHUP.
 - 2026-05-05 — connectors as tools: capabilities() exposed via per-spawn MCP server (`mcp__verona__<connector>__<cap>`). InboundEvent gains kind/channelId/attachments. SlackConnector subscribes to message events for thread replies + downloads attachments. Outbound thread anchoring writes to anchors.ndjson and is persisted to SessionStore by the dispatcher. Two-layer hook gating (Layer A destination + Layer B sideEffect) via `connector-guard.sh`. `post_response` removed; the agent decides via `slack__send_message`.
+- 2026-05-19 — inbound reply streaming: optional `Connector.openStream` returns a `ConnectorStream`; `Daemon.handleInbound` posts a placeholder up front and edits it with the accumulating assistant text (`onAssistantText` threaded through DispatchInput → AdapterRequest; claude-cli sets `--include-partial-messages`). `SlackStreamSink` debounces chat.update with rate-limit backoff. Settles via finalize (no agent post — replaces legacy auto-post) or discard (agent posted for itself). Disabled by `VERONA_SLACK_STREAM=0`; cron tasks never stream.

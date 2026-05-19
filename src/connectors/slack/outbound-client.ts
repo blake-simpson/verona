@@ -34,6 +34,8 @@ export interface SlackPostMessageResult {
 export interface SlackWebLike {
   chat: {
     postMessage(args: { channel: string; text: string; thread_ts?: string }): Promise<unknown>;
+    update?(args: { channel: string; ts: string; text: string }): Promise<unknown>;
+    delete?(args: { channel: string; ts: string }): Promise<unknown>;
   };
   files?: {
     uploadV2(args: {
@@ -89,6 +91,22 @@ export class SlackOutboundClient {
     const ts = typeof obj.ts === "string" ? obj.ts : "";
     const channel = typeof obj.channel === "string" ? obj.channel : input.channel;
     return { ts, channel, raw };
+  }
+
+  /** Edit an existing message in place (chat.update). Used for streaming. */
+  async updateMessage(input: { channel: string; ts: string; text: string }): Promise<void> {
+    if (!this.web.chat.update) {
+      throw new Error("Slack web client does not support chat.update");
+    }
+    await this.web.chat.update({ channel: input.channel, ts: input.ts, text: input.text });
+  }
+
+  /** Remove a message (chat.delete). Used to retract a streamed placeholder. */
+  async deleteMessage(input: { channel: string; ts: string }): Promise<void> {
+    if (!this.web.chat.delete) {
+      throw new Error("Slack web client does not support chat.delete");
+    }
+    await this.web.chat.delete({ channel: input.channel, ts: input.ts });
   }
 
   async uploadFile(input: SlackUploadFileInput): Promise<SlackUploadFileResult> {
