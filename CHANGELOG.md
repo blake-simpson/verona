@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.4.11
+
+**Released:** 2026-05-19
+
+### Changes since v0.4.10
+
+- Make Slack reply streaming actually stream, and harden the socket
+
 ## v0.4.10
 
 **Released:** 2026-05-19
